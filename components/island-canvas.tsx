@@ -6,7 +6,7 @@ import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
 import type { IslandSettings, TerrainData } from "@/lib/terrain";
 
-function IslandScene({ data, settings, showMarkers }: { data: TerrainData; settings: IslandSettings; showMarkers: boolean }) {
+function IslandScene({ data, settings, showMarkers, showGrid }: { data: TerrainData; settings: IslandSettings; showMarkers: boolean; showGrid: boolean }) {
   const terrainGeometry = useMemo(() => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(data.positions, 3));
@@ -53,16 +53,16 @@ function IslandScene({ data, settings, showMarkers }: { data: TerrainData; setti
           </mesh>
         </group>
       ))}
-      <gridHelper args={[settings.width * 1.3, 26, "#29414a", "#20323a"]} position={[0, 0, -7]} rotation={[Math.PI / 2, 0, 0]} />
+      {showGrid && <gridHelper args={[settings.width * 1.3, 26, "#29414a", "#20323a"]} position={[0, 0, -7]} rotation={[Math.PI / 2, 0, 0]} />}
       <OrbitControls makeDefault enableDamping dampingFactor={0.08} minDistance={settings.width * 0.25} maxDistance={settings.width * 3.5} maxPolarAngle={Math.PI * 0.49} />
     </>
   );
 }
 
-export default function IslandCanvas({ data, settings, showMarkers }: { data: TerrainData; settings: IslandSettings; showMarkers: boolean }) {
+export default function IslandCanvas({ data, settings, showMarkers, showGrid }: { data: TerrainData; settings: IslandSettings; showMarkers: boolean; showGrid: boolean }) {
   return (
     <Canvas dpr={[1, 1.7]} gl={{ antialias: true, powerPreference: "high-performance" }} onCreated={({ gl }) => { gl.setClearColor("#0a141b"); }}>
-      <IslandScene data={data} settings={settings} showMarkers={showMarkers} />
+      <IslandScene data={data} settings={settings} showMarkers={showMarkers} showGrid={showGrid} />
     </Canvas>
   );
 }
