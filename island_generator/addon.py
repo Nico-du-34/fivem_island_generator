@@ -620,6 +620,8 @@ class TW_PT_Panel(bpy.types.Panel):
 
         box = layout.box()
         box.label(text="FiveM Export")
+        box.label(text="OBJ/MTL + heightmap + resource scaffold", icon="INFO")
+        box.label(text="Sollumz conversion is still required", icon="INFO")
         box.prop(settings, "export_origin_x")
         box.prop(settings, "export_origin_y")
         box.prop(settings, "export_origin_z")
