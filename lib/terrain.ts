@@ -12,6 +12,9 @@ export type IslandSettings = {
   mountainWidth: number;
   valleyStrength: number;
   sandWidth: number;
+  originX: number;
+  originY: number;
+  originZ: number;
 };
 
 export type Landmark = { id: string; label: string; type: "city" | "port" | "airport" | "nature" | "tourism"; x: number; y: number; z: number };
@@ -214,4 +217,7 @@ export const DEFAULT_SETTINGS: IslandSettings = {
   mountainWidth: 0.30,
   valleyStrength: 0.22,
   sandWidth: 24,
+  originX: 0,
+  originY: 0,
+  originZ: 0,
 };
