@@ -7,12 +7,11 @@ import math
 import os
 import sys
 import traceback
-from array import array
 from pathlib import Path
 
 import bpy
 import numpy as np
-from mathutils import Euler, Quaternion, Vector
+from mathutils import Euler
 
 
 def progress(stage: str, done: int, warning: str | None = None):
@@ -30,12 +29,16 @@ def parse_args():
     return parser.parse_args(argv)
 
 
+ADDON_MODULE = None
+
 def load_sollumz():
+    global ADDON_MODULE
     addon_path = os.environ.get("SOLLUMZ_ADDON_PATH")
     module_name = os.environ.get("SOLLUMZ_ADDON_MODULE", "Sollumz")
     if addon_path:
         sys.path.insert(0, str(Path(addon_path).resolve().parent))
     if hasattr(bpy.types.Object, "sollum_type"):
+        ADDON_MODULE = module_name
         return
     errors = []
     for candidate in (module_name, "Sollumz", "sollumz"):
@@ -43,6 +46,7 @@ def load_sollumz():
             importlib.import_module(candidate)
             bpy.ops.preferences.addon_enable(module=candidate)
             if hasattr(bpy.types.Object, "sollum_type"):
+                ADDON_MODULE = candidate
                 return
         except Exception as exc:
             errors.append(candidate + ": " + str(exc))
@@ -50,6 +54,12 @@ def load_sollumz():
         "Sollumz n'est pas installé/activé dans ce profil Blender. "
         "Configure SOLLUMZ_ADDON_PATH et SOLLUMZ_ADDON_MODULE. " + " | ".join(errors)
     )
+
+
+def addon_import(relative_module: str):
+    if not ADDON_MODULE:
+        raise RuntimeError("Sollumz n'est pas encore chargé.")
+    return importlib.import_module(ADDON_MODULE + "." + relative_module)
 
 
 def read_buffers(job_path: Path, meta: dict):
@@ -148,19 +158,10 @@ def generate_fallback_texture(path: Path, tint_hex: str, role: int, normal: bool
     return image
 
 
-def load_or_create_image(path: Path, material: dict, role: int, is_normal: bool):
-    if path and path.exists():
-        image = bpy.data.images.load(str(path), check_existing=True)
-        image.name = material["id"] + ("_normal" if is_normal else "_diffuse")
-        image.colorspace_settings.name = "Non-Color" if is_normal else "sRGB"
-        return image
-    generated = path if path else None
-    raise RuntimeError("Chemin de texture non défini." if generated is None else "Texture absente.")
-
 
 def ensure_materials(meta: dict, artifact_root: Path):
     from szio.gta5.shader import ShaderManager
-    from Sollumz.ydr.shader_materials import create_shader
+    create_shader = addon_import("ydr.shader_materials").create_shader
 
     texture_dir = artifact_root / "generated-textures"
     texture_dir.mkdir(parents=True, exist_ok=True)
@@ -308,7 +309,7 @@ def build_mesh(name: str, n: int, heights: np.ndarray, weights: np.ndarray, land
 
 
 def convert_visual_to_drawable(obj, name: str):
-    from Sollumz.tools.drawablehelper import convert_obj_to_drawable
+    convert_obj_to_drawable = addon_import("tools.drawablehelper").convert_obj_to_drawable
     obj.name = name
     root = convert_obj_to_drawable(obj)
     root.name = name
@@ -316,8 +317,8 @@ def convert_visual_to_drawable(obj, name: str):
 
 
 def convert_collision_mesh(obj, name: str):
-    from Sollumz.tools.boundhelper import convert_obj_to_composite
-    from Sollumz.sollumz_properties import SollumType
+    convert_obj_to_composite = addon_import("tools.boundhelper").convert_obj_to_composite
+    SollumType = addon_import("sollumz_properties").SollumType
     obj.name = name
     composite = convert_obj_to_composite(obj, SollumType.BOUND_GEOMETRYBVH)
     composite.name = name
@@ -347,8 +348,8 @@ def main():
     progress("Chargement de Sollumz et PyMateria", 1)
     load_sollumz()
     from szio.gta5 import AssetFormat, is_provider_available
-    from Sollumz.sollumz_preferences import get_addon_preferences
-    from Sollumz.ymap_next.properties.map import get_maps
+    get_addon_preferences = addon_import("sollumz_preferences").get_addon_preferences
+    get_maps = addon_import("ymap_next.properties.map").get_maps
 
     if not is_provider_available(AssetFormat.NATIVE):
         raise RuntimeError(
@@ -512,6 +513,58 @@ def main():
     bpy.ops.wm.save_as_mainfile(filepath=str(output_root / (resource + "_" + "gen" + str(generation) + ".blend")))
 
     progress("Rapport et validation des fichiers", 6)
+    config_dir = output_root / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    origin_x = float(params.get("originX", 0))
+    origin_y = float(params.get("originY", 0))
+    props_types = {
+        "trees": params.get("treeTypes") or ["prop_palm_med_01b"],
+        "rocks": params.get("rockTypes") or ["prop_rock_1_d"],
+    }
+    vegetation_placements = []
+    for index, placement in enumerate(props):
+        x, y, z, scale, rotation, kind = [float(v) for v in placement]
+        models = props_types["rocks"] if kind > 0.5 else props_types["trees"]
+        if models:
+            vegetation_placements.append({
+                "x": x + origin_x, "y": y + origin_y, "z": z,
+                "scale": scale, "rotation": rotation,
+                "kind": "rock" if kind > 0.5 else "tree",
+                "model": models[index % len(models)],
+            })
+    grass_types = params.get("grassTypes") or ["proc_grasses01"]
+    grass_placements = [
+        {
+            "x": float(item[0]) + origin_x,
+            "y": float(item[1]) + origin_y,
+            "z": float(item[2]),
+            "scale": float(item[3]),
+            "model": grass_types[index % len(grass_types)],
+        }
+        for index, item in enumerate(grass)
+    ]
+    (config_dir / "materials.json").write_text(json.dumps({
+        "source": "GunWare GTA texture dictionary names supplied with Island Forge",
+        "materials": meta.get("materials", []),
+        "actualImages": "User-supplied overrides or generated fallback PNG maps; original GTA bitmap files are not bundled.",
+    }, indent=2), encoding="utf-8")
+    (config_dir / "vegetation-placements.json").write_text(json.dumps({
+        "nativeEntitiesWritten": props_written,
+        "placements": vegetation_placements,
+        "note": "Tree/rock model names reference game archetypes; check their availability on the target game build.",
+    }, indent=2), encoding="utf-8")
+    (config_dir / "grass-placements.json").write_text(json.dumps({
+        "nativeGrassBatchWritten": False,
+        "placements": grass_placements,
+        "note": "Grass is exported as source placement data, not yet as a native YMAP grass batch.",
+    }, indent=2), encoding="utf-8")
+    (config_dir / "water.json").write_text(json.dumps({
+        "waterLevel": 0,
+        "seaDepth": float(params.get("seaDepth", 60)),
+        "wavesPreview": bool(params.get("waves", False)),
+        "nativeWaterQuadWritten": False,
+        "note": "Native GTA water quad authoring remains a separate step.",
+    }, indent=2), encoding="utf-8")
     written = [str(path.relative_to(output_assets)) for path in output_assets.rglob("*") if path.is_file()]
     report = {
         "resource": resource,
