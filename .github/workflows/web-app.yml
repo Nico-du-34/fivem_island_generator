@@ -22,6 +22,8 @@ jobs:
         run: |
           cmake -S native-engine -B build/native -DCMAKE_BUILD_TYPE=Release
           cmake --build build/native --config Release --parallel 2
+      - name: Verify native RAGE executable
+        run: ./build/native/island-forge-native-engine --version
       - name: Check Windows worker JavaScript syntax
         run: node --check native-worker/server.mjs
       - name: Smoke test npm run dev and local worker
@@ -53,3 +55,20 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
+
+
+  native-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure native RAGE exporter
+        run: cmake -S native-engine -B build/native -DCMAKE_BUILD_TYPE=Release
+      - name: Compile Windows x64 exporter
+        run: cmake --build build/native --config Release --parallel 2
+      - name: Verify Windows executable
+        shell: pwsh
+        run: |
+          $binary = "build/native/Release/island-forge-native-engine.exe"
+          if (!(Test-Path $binary)) { throw "Native exporter executable was not produced." }
+          & $binary --version
+          if ($LASTEXITCODE -ne 0) { throw "Native exporter version check failed." }
