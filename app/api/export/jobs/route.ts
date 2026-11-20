@@ -29,11 +29,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const upstream = await fetch(\`${base}/api/export/jobs\`, {
+    const upstream = await fetch(`${base}/api/export/jobs`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: \`Bearer ${token}\`,
+        authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(payload),
       cache: "no-store",
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : "Worker local inaccessible.";
     return Response.json({
       code: "bridge_unavailable",
-      error: \`Impossible de joindre le worker local : ${message}. Lance l'application avec npm run dev.\`,
+      error: `Impossible de joindre le worker local : ${message}. Lance l'application avec npm run dev.`,
     }, { status: 502 });
   }
 }
