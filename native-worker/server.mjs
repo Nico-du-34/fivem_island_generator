@@ -1,15 +1,13 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, stat, writeFile, copyFile } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { gunzipSync } from "node:zlib";
-import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(process.env.ISLAND_WORKER_DATA || "./island-worker-data");
-const SCRIPT = fileURLToPath(new URL("./blender/export_island.py", import.meta.url));
-const BLENDER = process.env.BLENDER_PATH || "";
+const NATIVE_ENGINE = resolve(process.env.ISLAND_NATIVE_ENGINE || "./.islandforge/bin/island-forge-native-engine.exe");
 const TOKEN = process.env.ISLAND_EXPORT_BRIDGE_TOKEN || "islandforge-local-development-only";
 const HOST = process.env.ISLAND_WORKER_HOST || "127.0.0.1";
 const PORT = Number(process.env.ISLAND_EXPORT_BRIDGE_PORT || 8787);
@@ -114,6 +112,7 @@ async function writeJobPayload(id, payload) {
     materials: payload.materials || [],
     options: payload.options || {},
     counts: validated.counts,
+    placedAssets: Array.isArray(payload.placedAssets) ? payload.placedAssets.slice(0, 10000) : [],
     binaryFile: "terrain.f32",
   };
   await writeFile(join(dir, "job.json"), JSON.stringify(meta, null, 2));
