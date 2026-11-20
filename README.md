@@ -1,72 +1,88 @@
-# Island Forge — FiveM Island Generator
+# Island Forge — FiveM Island Creator
 
-Island Forge is a browser-based procedural island studio for creating tropical terrain concepts and exporting a source package for a FiveM map workflow.
+Island Forge is a browser-based procedural terrain editor inspired by the workflow of professional GTA V / FiveM map tools. The editor runs in the browser and uses Three.js for the 3D viewport.
 
-## What it does
+## Editor features
 
-- Generates a seeded tropical island directly in the browser.
-- Interactive 3D preview with orbit/zoom controls.
-- Adjustable width, length, resolution, tiles, coastline, beaches, mountain ridges and valleys.
-- Suggests RP region markers: city, port, airport, tourism and natural areas.
-- Exports a ZIP with tiled OBJ geometry, MTL materials, a GLB preview, a 16-bit RAW heightmap, coordinates, landmarks and a FiveM resource scaffold.
+### Generate
+- Nine island/map shapes: round, long, crescent, twin, archipelago, atoll, volcano, continent and scattered islands.
+- World sizes from 512 m to 16,384 m.
+- Seeded generation and one-click preset variants.
+- Adjustable land coverage, coast noise, domain warp, elevation, mountains, hills, terraces, seabed depth and beach profile.
+- Hydraulic and thermal erosion passes.
+- Resolution/cell-size choices constrained by world size.
 
-## Important FiveM export limitation
+### Sculpt and test
+- Raise, lower, smooth, flatten, material paint, paint erase, remove vegetation and add vegetation brushes.
+- Brush radius and strength controls.
+- Undo/redo history for brush strokes.
+- Orbit and top-down camera views.
+- Walk mode with a human-scale character, movement, sprint, slow walk, jump and first-/third-person camera.
+- Time-of-day lighting, animated water preview, vegetation and rock batches.
+- Display modes, layer visibility, grid and chunk overlays.
 
-The browser export is a **source package**, not a ready-to-stream GTA V map. FiveM does not stream OBJ or GLB as native map assets. A production map still needs GTA-native assets and validation: YDR drawables, YBN collisions, YMAP placements, YTYP archetypes, LODs, materials/shaders and water/world setup. Use Blender with a compatible Sollumz workflow and validate in CodeWalker and a local FiveM test server before deployment.
+### Surface and GTA placement
+- Four terrain material channels: beach sand, lush grass, rock/cliff and forest dirt.
+- Grass, tree and rock density/type controls.
+- GTA prop and procedural-grass tag settings.
+- GTA coordinate placement map with presets, world-bound checks and approximate overlap warnings.
+- gen8 Legacy / gen9 Enhanced export target selection.
 
-The export deliberately labels this status in the ZIP and does not pretend that OBJ/GLB are native FiveM assets.
+## Export modes
+
+### Source package (available without a backend)
+
+The browser ZIP contains:
+- Tiled OBJ terrain geometry and MTL materials.
+- GLB preview.
+- 16-bit RAW heightmap and metadata.
+- World parameters, coordinate bounds, landmarks, road guide points and vegetation placement points.
+- A FiveM resource scaffold (fxmanifest.lua) with a conversion checklist.
+
+**This is a source/interchange package, not a finished FiveM map.** OBJ, GLB and RAW are not GTA V streamable map formats.
+
+### Native FiveM package (requires an export bridge)
+
+The editor has a server-side proxy for a separate Windows export service. Set the following environment variables:
+
+\`\`\`dotenv
+ISLAND_EXPORT_BRIDGE_URL=http://127.0.0.1:8787
+ISLAND_EXPORT_BRIDGE_TOKEN=replace-with-a-long-random-token
+\`\`\`
+
+The bridge must implement the routes and payload contract in [docs/export-bridge.md](docs/export-bridge.md). It is responsible for using the chosen GTA toolchain to create and validate native RAGE assets such as YDR, YBN, YMAP, YTYP and YTD, plus LOD/SLOD, collisions, shaders and water configuration. The web app does not claim that source geometry is native GTA content.
+
+When no bridge is configured, the native export button returns a clear bridge_missing error and the browser source export remains available.
 
 ## Run locally
 
 Requirements: Node.js 20+.
 
-```bash
+\`\`\`bash
 npm install
 npm run dev
-```
+\`\`\`
 
 Open http://localhost:3000.
 
-## Build
+## Type check and production build
 
-```bash
+\`\`\`bash
 npm run typecheck
 npm run build
 npm start
-```
+\`\`\`
 
 ## Deploy
 
-The application is a standard Next.js app and can be deployed to a Node.js host or Vercel. It runs entirely in the browser after loading; no database or backend is required for the procedural generator and ZIP export.
+Deploy as a standard Next.js Node.js application. The procedural generator, 3D viewport and source ZIP export run in the browser. Native export requires the separate bridge service on a host with the required GTA conversion tools. Do not expose the bridge directly to the public internet; put it behind a firewall and configure a token.
 
-## Export contents
+## Coordinate notes
 
-```text
-tw_generated_island/
-├── config/
-│   ├── world.json
-│   └── landmarks.json
-├── source_geometry/
-│   ├── terrain_00.obj
-│   ├── terrain_00.mtl
-│   ├── island_terrain.mtl
-│   ├── island.glb
-│   ├── heightmap_16bit.raw
-│   └── heightmap.json
-├── stream/
-│   └── README_CONVERSION_REQUIRED.txt
-├── fxmanifest.lua
-└── README_INSTALL.txt
-```
-
-Exact number of OBJ tiles depends on the island shape and tile setting.
-
-## Coordinate conventions
-
-- One Blender Unit is treated as one metre.
-- OBJ coordinates are exported as X/Y horizontal and Z elevation.
-- The export origin is added to package coordinates, not to the browser preview.
-- GTA V world bounds are finite. Check the selected origin and island bounds in CodeWalker before attempting to replace Los Santos/Blaine County.
+- One world unit is treated as one metre.
+- Export placement uses X/Y world origin and terrain elevation on Z.
+- GTA V has finite world bounds. The placement map is indicative; verify actual collisions/overlaps in CodeWalker before deploying a world replacement.
+- Large worlds increase CPU, memory, triangle counts and export time. Start with a low-resolution test before selecting 8–16 km worlds.
 
 ## License
 
