@@ -130,9 +130,8 @@ if (startLocalWorker) {
       const addon = findSollumz(blender);
       if (addon) env.SOLLUMZ_ADDON_PATH = addon;
       console.log("[Island Forge] Blender détecté :", blender);
-      console.log(addon
-        ? "[Island Forge] Sollumz détecté :", addon
-        : "[Island Forge] Sollumz non détecté automatiquement ; vérifie son installation dans Blender.");
+      if (addon) console.log("[Island Forge] Sollumz détecté :", addon);
+      else console.log("[Island Forge] Sollumz non détecté automatiquement ; vérifie son installation dans Blender.");
     } else {
       console.warn("[Island Forge] Blender non détecté. L'éditeur et l'export source fonctionneront ; l'export GTA natif demandera Blender + Sollumz.");
     }
@@ -162,12 +161,10 @@ if (startLocalWorker) {
 if (mode === "worker") {
   if (!worker && await portIsOpen(Number(env.ISLAND_WORKER_PORT))) {
     console.log("[Island Forge] Le worker répond déjà sur", localBase);
-    return;
+  } else if (worker) {
+    await new Promise((resolvePromise) => worker.once("exit", resolvePromise));
   }
-  if (worker) await new Promise((resolvePromise) => worker.once("exit", resolvePromise));
-  return;
-}
-
+} else {
 const nextCli = require.resolve("next/dist/bin/next");
 const webMode = mode === "start" ? "start" : "dev";
 web = spawn(process.execPath, [nextCli, webMode, ...forwardedArgs], {
@@ -181,3 +178,4 @@ web.once("error", (error) => {
   stop(1);
 });
 web.once("exit", (code, signal) => stop(code ?? (signal ? 1 : 0)));
+}
