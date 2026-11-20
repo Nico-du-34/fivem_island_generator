@@ -109,7 +109,7 @@ function hexToRgb(hex: string) {
 function materialTextureValue(material: GunwareMaterial, u: number, v: number) {
   const role = material.role;
   const broad = Math.sin(u * (role === 2 ? 0.8 : 1.7) + Math.cos(v * 1.1) * 1.3);
-  const fine = Math.sin(u * 8.3 + Math.sin(v * 7.1)) * Math.cos(v * 9.7);
+  const fine = Math.sin(u * 8.0 + Math.sin(v * 7.0)) * Math.cos(v * 10.0);
   const grain = Math.sin(u * 43.0 + v * 17.0) * Math.sin(v * 37.0 - u * 13.0);
   const ridges = Math.sin((u * 0.8 + v * 0.23) * Math.PI * 4 + Math.sin(v * 2.1));
   const height = role === 0
