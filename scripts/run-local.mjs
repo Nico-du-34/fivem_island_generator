@@ -58,7 +58,7 @@ async function installNativeEngine() {
     return false;
   }
 
-  const releaseUrl = "https://github.com/Nico-du-34/fivem_island_generator/releases/download/native-engine-v0.1.0/island-forge-native-engine-win-x64.exe";
+  const releaseUrl = "https://github.com/Nico-du-34/fivem_island_generator/releases/download/native-engine-v0.1.0/island-forge-native-engine.exe";
   console.log("[Island Forge] Vérification du moteur d'export GTA intégré…");
   try {
     const response = await fetch(releaseUrl, { signal: AbortSignal.timeout(45_000) });
