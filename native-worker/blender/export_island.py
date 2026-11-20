@@ -298,7 +298,7 @@ def build_mesh(name: str, n: int, heights: np.ndarray, weights: np.ndarray, land
         mesh.materials.append(material)
 
     if base_collision and collision_indices:
-        from Sollumz.ybn.collision_materials import create_collision_material_from_index
+        create_collision_material_from_index = addon_import("ybn.collision_materials").create_collision_material_from_index
         mesh.materials.clear()
         for index in collision_indices:
             mesh.materials.append(create_collision_material_from_index(int(index)))
