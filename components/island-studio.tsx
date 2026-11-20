@@ -687,6 +687,7 @@ export default function IslandStudio() {
         body: JSON.stringify({
           params: generatedSettings,
           gen: gameGen,
+          placedAssets: placedAssets.map(({ name, x, y, z, heading, scale }) => ({ name, x, y, z, heading, scale })),
           edits: await encodeTerrainEdits(terrain),
           options: {
             xml,
