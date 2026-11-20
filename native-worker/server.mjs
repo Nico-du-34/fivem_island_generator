@@ -287,7 +287,15 @@ async function processJob(job) {
     await copyFile(blenderReport, join(reportDir, "blender-report.json"));
   }
   await copyFile(FINALIZER, join(packageDir, "finalize-ymap.ps1"));
-  await writeFile(join(configDir, "materials.json"), JSON.stringify(job.meta.materials || [], null, 2));
+  for (const name of ["materials.json", "vegetation-placements.json", "grass-placements.json", "water.json"]) {
+    const source = join(artifacts, "config", name);
+    if (await stat(source).then(() => true).catch(() => false)) {
+      await copyFile(source, join(configDir, name));
+    }
+  }
+  if (!(await stat(join(configDir, "materials.json")).then(() => true).catch(() => false))) {
+    await writeFile(join(configDir, "materials.json"), JSON.stringify(job.meta.materials || [], null, 2));
+  }
   await writeFile(join(configDir, "worker-job.json"), JSON.stringify({
     generation: job.generation,
     params: job.meta.params,
