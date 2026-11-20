@@ -1,6 +1,6 @@
 # Native export bridge contract
 
-The browser editor creates a complete **conversion source package** and sends edited terrain buffers to a separate native export worker. The worker must run on Windows with the matching GTA V build assets and conversion tools. The Next.js API routes are only an authenticated proxy; they do not convert OBJ or float arrays into RAGE binaries by themselves.
+The browser editor sends edited terrain buffers and selected GunWare material references to the Windows worker in [native-worker/](../native-worker/). The worker uses Blender, Sollumz and PyMateria to produce native YDR/YBN/YTYP/YTD assets, plus a YMAP CodeWalker XML. The Next.js API routes are an authenticated proxy only. The YMAP binary must still be finalized in CodeWalker; the returned ZIP stays marked as not ready until that is done.
 
 ## Configuration
 
@@ -84,8 +84,9 @@ The edits binary is base64-encoded. Decode it, decompress gzip when compression 
 1. heights: one value per terrain sample.
 2. blendWeights: four values per terrain sample, in order sand / grass / rock / dirt.
 3. vegetationMask: one value per terrain sample.
-4. props: six values per placement: X, Y, Z, scale, rotation radians, kind (0 tree, 1 rock).
-5. grass: four values per placement: X, Y, Z, scale.
+4. land: one value per terrain sample (0–1 coast/land mask).
+5. props: six values per placement: X, Y, Z, scale, rotation radians, kind (0 tree, 1 rock).
+6. grass: four values per placement: X, Y, Z, scale.
 
 The counts object is authoritative for array boundaries. Validate the exact total byte size before allocating geometry. The legacy heightsCount, blendCount, vegetationCount, propsCount and grassCount fields are also included for compatibility.
 
@@ -149,3 +150,34 @@ Do not return state: "done" until the ZIP contains the required native files and
 - Use isolated temporary folders per job and remove them after expiry.
 - Return detailed but non-sensitive error messages.
 - Never trust client-provided file paths or shell commands.
+
+
+## Included Windows worker
+
+The repository contains a Node.js worker and a Blender background script:
+
+- native-worker/server.mjs — bearer-token HTTP service, request validation, one-at-a-time queue, job polling and ZIP download.
+- native-worker/blender/export_island.py — terrain reconstruction, tile mesh creation, collision BVH, YDR/YBN/YTYP/YTD exports, YMAP entities and LOD hierarchy.
+- native-worker/finalize-ymap.ps1 — integrates a binary YMAP saved by CodeWalker into stream/ and updates nativeReady metadata.
+- native-worker/README.md — Windows prerequisites and installation instructions.
+
+The worker listens on port 8787 by default. Configure the same ISLAND_EXPORT_BRIDGE_TOKEN on the Windows host and Next.js server. Never expose this service directly to the public internet.
+
+### Output state
+
+The current worker generates six visual LOD tiers per terrain tile (HD, LOD, SLOD1–SLOD4), a coarse independent BVH collision, one YTYP archetype per drawable/LOD, and YTD material images. Tree and rock placements are YMAP entities referencing game archetypes.
+
+The worker deliberately returns:
+- state done after the binary YDR/YBN/YTYP/YTD assets and YMAP XML have been validated.
+- nativeReady false until the matching YMAP XML is saved as a binary .ymap in CodeWalker and passed to finalize-ymap.ps1.
+
+A source XML file is not a binary YMAP. The package must not be treated as a complete FiveM island until finalization and a clean-server test.
+
+### Still not emitted as native map data
+
+- Native GTA water quads are not built yet; water configuration is placed in config/water.json.
+- Grass points are preserved in config/grass-placements.json, but are not yet serialized as a YMAP grass batch.
+- Tree and rock model names are existing GTA archetype references; the worker does not bundle those models or guarantee their presence on a modified game build.
+- The worker creates generated fallback diffuse/normal PNGs when no image override is provided. The uploaded GunWare source bundle contained texture dictionary names, not the original source bitmaps. Use GUNWARE_TEXTURE_DIR for legally available texture replacements.
+
+See [native-worker/README.md](../native-worker/README.md) for setup and the CodeWalker finalization command.
