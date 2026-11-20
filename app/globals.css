@@ -337,3 +337,10 @@ code, kbd { font-family: var(--mono); }
 @media (max-width: 1050px) {
   .gta-data-results { max-height: 180px; }
 }
+
+.gta-placed-row { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.gta-placed-head { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+.gta-placed-fields { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 5px; }
+.gta-placed-fields label { display: flex; flex-direction: column; gap: 3px; color: var(--text-faint); font-size: 8px; }
+.gta-placed-fields input { width: 100%; min-width: 0; height: 25px; padding: 0 4px; border: 1px solid var(--border-mid); border-radius: 4px; background: var(--panel); color: var(--text); font: 9px var(--mono); }
+.gta-placed-coords { color: var(--text-faint); font-size: 8px; }
