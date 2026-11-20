@@ -191,88 +191,136 @@ function ellipseDistance(x: number, y: number, cx: number, cy: number, rx: numbe
   return Math.hypot((x - cx) / rx, (y - cy) / ry);
 }
 
-function shapeDistance(shape: IslandShape, x: number, y: number, coverage: number) {
-  const scale = 0.48 + coverage * 0.52;
-  const base = ellipseDistance(x, y, 0, 0, 0.91 * scale, 0.82 * scale);
+function smoothMax(a: number, b: number, radius: number) {
+  if (radius <= 0) return Math.max(a, b);
+  const h = clamp(0.5 + 0.5 * (a - b) / radius);
+  return b * (1 - h) + a * h + radius * h * (1 - h);
+}
+
+type ShapeBlob = { x: number; y: number; rx: number; ry: number };
+const shapeBlobCache = new Map<string, ShapeBlob[]>();
+
+function getShapeBlobs(shape: IslandShape, coverage: number, seed: number): ShapeBlob[] {
+  const key = `${shape}:${coverage.toFixed(4)}:${seed >>> 0}`;
+  const cached = shapeBlobCache.get(key);
+  if (cached) return cached;
+  const radius = Math.max(0.15, coverage);
+  const random = seededRandom(seed ^ (shape === "twin" ? 0x51ed270b : shape === "archipelago" ? 0x2c1b3c6d : 0x6d2b79f5));
+  const count = shape === "twin" ? 2 : shape === "archipelago" ? 6 : 9;
+  const blobs: ShapeBlob[] = [];
+  for (let i = 0; i < count; i++) {
+    const angle = shape === "twin" ? (i === 0 ? Math.PI : 0) : random() * Math.PI * 2;
+    const radial = shape === "twin" ? radius * 0.34 : radius * (0.16 + random() * (shape === "islands" ? 0.90 : 0.78));
+    const size = shape === "twin"
+      ? radius * (0.46 + (i === 0 ? 0.04 : -0.02))
+      : radius * (shape === "islands" ? 0.13 + random() * 0.16 : i === 0 ? 0.34 + random() * 0.09 : 0.13 + random() * 0.14);
+    blobs.push({
+      x: Math.cos(angle) * radial,
+      y: Math.sin(angle) * radial * (shape === "twin" ? 0.28 : 1),
+      rx: size * (0.88 + random() * 0.26),
+      ry: size * (0.70 + random() * 0.33),
+    });
+  }
+  if (shapeBlobCache.size > 32) shapeBlobCache.clear();
+  shapeBlobCache.set(key, blobs);
+  return blobs;
+}
+
+function shapeField(shape: IslandShape, x: number, y: number, coverage: number, seed: number) {
+  const angle = ((seed >>> 0) % 6283) / 1000;
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  const rx = x * cos - y * sin;
+  const ry = x * sin + y * cos;
+  const radius = Math.max(0.15, coverage);
+  const ellipse = (px: number, py: number, cx: number, cy: number, ax: number, ay = ax) =>
+    1 - Math.hypot((px - cx) / ax, (py - cy) / ay);
   switch (shape) {
     case "long":
-      return ellipseDistance(x, y, 0, 0, 1.15 * scale, 0.56 * scale);
+      return 1 - Math.hypot(rx / (radius * 1.38), ry / (radius * 0.56));
     case "crescent": {
-      const outer = ellipseDistance(x, y, -0.02, 0.02, 1.0 * scale, 0.86 * scale);
-      const inner = ellipseDistance(x, y, 0.20, 0.05, 0.79 * scale, 0.73 * scale);
-      return Math.max(outer, 1.0 - inner * 0.9);
+      const outer = 1 - Math.hypot(rx, ry) / radius;
+      const inner = Math.hypot(rx - radius * 0.50, ry) / (radius * 0.72) - 1;
+      return Math.min(outer, inner * 1.35);
     }
     case "twin":
-      return Math.min(ellipseDistance(x, y, -0.38, 0, 0.58 * scale, 0.72 * scale), ellipseDistance(x, y, 0.40, 0.02, 0.60 * scale, 0.70 * scale));
-    case "archipelago": {
-      const centers = [[-0.48, 0.15, 0.34], [-0.06, 0.30, 0.32], [0.36, 0.10, 0.38], [0.12, -0.40, 0.33], [-0.52, -0.38, 0.23]];
-      return Math.min(...centers.map(([cx, cy, r]) => ellipseDistance(x, y, cx, cy, r * scale, r * scale * 0.82)));
+    case "archipelago":
+    case "islands": {
+      const blobs = getShapeBlobs(shape, coverage, seed);
+      let field = -2;
+      for (const blob of blobs) {
+        field = smoothMax(field, ellipse(x, y, blob.x, blob.y, blob.rx, blob.ry), radius * (shape === "twin" ? 0.035 : 0.045));
+      }
+      return field;
     }
     case "atoll": {
-      const d = ellipseDistance(x, y, 0, 0, 0.94 * scale, 0.85 * scale);
-      const lagoon = ellipseDistance(x, y, 0.04, -0.01, 0.47 * scale, 0.38 * scale);
-      return Math.max(d, 1.0 - lagoon * 0.92);
+      const radial = Math.hypot(rx, ry * 1.04);
+      const outer = 1 - Math.abs(radial - radius * 0.78) / (radius * 0.22);
+      return outer + Math.sin(Math.atan2(ry, rx) * 5 + seed * 0.003) * 0.035;
     }
-    case "volcano": {
-      const d = ellipseDistance(x, y, 0, 0, 0.84 * scale, 0.82 * scale);
-      const crater = ellipseDistance(x, y, 0.04, 0.05, 0.15 * scale, 0.13 * scale);
-      return Math.max(d, 1.0 - crater * 0.55);
-    }
-    case "continent":
-      return Math.min(
-        ellipseDistance(x, y, -0.12, 0.05, 1.10 * scale, 0.95 * scale),
-        ellipseDistance(x, y, 0.46, -0.18, 0.55 * scale, 0.66 * scale),
-      ) + Math.max(0, Math.abs(x) - 0.92) * 0.3;
-    case "islands": {
-      const centers = [[-0.55, 0.42, 0.28], [-0.12, 0.52, 0.28], [0.38, 0.45, 0.32], [-0.45, -0.08, 0.27], [0.02, -0.14, 0.32], [0.55, -0.18, 0.28], [-0.15, -0.60, 0.25], [0.38, -0.58, 0.22]];
-      return Math.min(...centers.map(([cx, cy, r]) => ellipseDistance(x, y, cx, cy, r * scale, r * scale * 0.85)));
+    case "volcano":
+    case "round":
+      return 1 - Math.hypot(rx / radius, ry / (radius * 0.92));
+    case "continent": {
+      const main = 1 - Math.hypot(rx / (radius * 1.12), ry / (radius * 0.98));
+      const peninsula = 1 - Math.hypot((rx - radius * 0.56) / (radius * 0.52), (ry + radius * 0.18) / (radius * 0.66));
+      return smoothMax(main, peninsula, radius * 0.09);
     }
     default:
-      return base;
+      return 1 - Math.hypot(rx / radius, ry / (radius * 0.92));
   }
 }
 
 export function sampleTerrain(nx: number, ny: number, p: IslandSettings) {
-  const warpX = fbm(nx * 2.2 + 17, ny * 2.2, p.seed + 11) * p.warp * 0.18;
-  const warpY = fbm(nx * 2.2, ny * 2.2 - 23, p.seed + 29) * p.warp * 0.18;
-  const x = nx + warpX, y = ny + warpY;
-  const distance = shapeDistance(p.shape, x, y, p.coverage);
-  const angular = Math.atan2(y, x);
-  const coastFractal =
-    fbm(x * 2.4, y * 2.4, p.seed) * 0.15 +
-    fbm(x * 7.5, y * 7.5, p.seed + 37) * 0.045 +
-    Math.sin(angular * 7 + p.seed * 0.19) * 0.025;
-  const roughness = p.coastNoise * 0.22;
-  const coast = distance + coastFractal * roughness;
-  const land = clamp(1 - smoothstep(0.88, 1.04, coast));
-  const inland = smoothstep(0.02, Math.max(0.08, p.beachWidth), land);
-
-  let mountainField = fbm(x * 1.55, y * 1.55, p.seed + 101) * 0.5 + 0.5;
-  let ridge = 1 - Math.abs(fbm(x * 2.4, y * 2.4, p.seed + 211));
-  let hills = fbm(x * 4.2, y * 4.2, p.seed + 313) * 0.5 + 0.5;
-  const spine = Math.exp(-Math.pow((x * 0.48 + y * 0.8 + 0.08) / 0.42, 2)) * smoothstep(-0.8, 0.1, y);
-  const broadRelief = (0.10 + hills * p.hills * 0.55 + (mountainField * 0.28 + ridge * 0.2 + spine * 0.45) * p.mountains);
-  let height = Math.max(0, broadRelief) * p.maxHeight * inland;
+  const warpScale = p.warp * 0.18;
+  const warpX = fbm(nx * 2.1 + 17, ny * 2.1 - 5, p.seed + 11, 3) * warpScale;
+  const warpY = fbm(nx * 2.1 - 9, ny * 2.1 + 23, p.seed + 29, 3) * warpScale;
+  const x = nx + warpX;
+  const y = ny + warpY;
+  const baseField = shapeField(p.shape, x, y, p.coverage, p.seed);
+  const angle = Math.atan2(y, x);
+  const coastNoise =
+    fbm(x * 3.2, y * 3.2, p.seed + 37, 3) * 0.11 +
+    fbm(x * 10.5, y * 10.5, p.seed + 71, 3) * 0.035 +
+    fbm(x * 23, y * 23, p.seed + 109, 2) * 0.009 +
+    Math.sin(angle * 7 + p.seed * 0.019) * 0.018;
+  const coast = baseField + coastNoise * p.coastNoise;
+  const land = smoothstep(-0.045, 0.045, coast);
+  const lowFrequency = fbm(x * 1.8 + 2.4, y * 1.8 - 7.2, p.seed + 101, 4) * 0.5 + 0.5;
+  const hills = fbm(x * 4.6, y * 4.6, p.seed + 211, 4) * 0.5 + 0.5;
+  const detail = fbm(x * 11.5, y * 11.5, p.seed + 313, 3);
+  const ridges = Math.pow(1 - Math.abs(fbm(x * 3.6 + 1.7, y * 3.6 - 3.1, p.seed + 419, 4)), 1.65);
+  const spine = Math.pow(Math.max(0, 1 - Math.abs(x * 0.52 + y * 0.78 + 0.08) / 0.54), 2)
+    * smoothstep(-0.72, 0.08, y);
+  let relief = 0.10
+    + hills * p.hills * 0.38
+    + lowFrequency * p.hills * 0.16
+    + (ridges * 0.48 + lowFrequency * 0.20 + spine * 0.34) * p.mountains
+    + detail * (0.035 + p.hills * 0.035);
+  relief = Math.max(0.025, relief);
   if (p.shape === "volcano") {
-    const ring = Math.exp(-Math.pow((Math.hypot(x, y) - 0.33) / 0.16, 2));
-    const crater = Math.exp(-Math.pow(Math.hypot(x, y) / 0.16, 2));
-    height = (0.08 + ring * (0.95 * p.mountains) + hills * p.hills * 0.25 - crater * 0.35) * p.maxHeight * inland;
+    const radial = Math.hypot(x, y);
+    const ring = Math.exp(-Math.pow((radial - p.coverage * 0.46) / Math.max(0.07, p.coverage * 0.18), 2));
+    const crater = Math.exp(-Math.pow(radial / Math.max(0.05, p.coverage * 0.19), 2));
+    relief = 0.07 + ring * (0.80 + p.mountains * 0.55) + hills * p.hills * 0.18 - crater * 0.36;
+  } else if (p.shape === "atoll") {
+    relief = 0.035 + hills * p.hills * 0.055;
   }
-  if (p.shape === "atoll") {
-    height = (0.04 + hills * p.hills * 0.09) * p.maxHeight * inland;
+  const innerRelief = smoothstep(0.045, 0.38, coast);
+  const beachCrest = p.beachHeight * smoothstep(0.0, 0.095, coast);
+  let height = beachCrest + relief * p.maxHeight * Math.pow(innerRelief, 0.82);
+  if (p.terraces > 0.001 && height > 1) {
+    const steps = 6 + Math.round(p.terraces * 18);
+    const stepHeight = Math.max(2, p.maxHeight / steps);
+    const stepped = Math.floor(height / stepHeight) * stepHeight;
+    height = height * (1 - p.terraces) + stepped * p.terraces;
   }
-  if (p.terraces > 0.001) {
-    const steps = 5 + Math.round(p.terraces * 18);
-    const stepped = Math.floor((height / Math.max(1, p.maxHeight)) * steps) / steps;
-    height = height * (1 - p.terraces) + stepped * p.maxHeight * p.terraces;
-  }
-  const beachBand = smoothstep(0, p.beachWidth, land) * smoothstep(p.beachWidth + 0.12, p.beachWidth, land);
-  height = Math.max(0, height + beachBand * p.beachHeight * 0.42);
-  const seabed = -smoothstep(0.88, 1.35, coast) * p.seaDepth;
-  const finalHeight = land > 0.02 ? height : seabed;
+  const offshore = smoothstep(0.012, 0.52, -coast);
+  const shelf = smoothstep(0.012, 0.15, -coast);
+  const underwaterNoise = fbm(x * 3.5, y * 3.5, p.seed + 557, 3) * 1.1;
+  const seabed = -offshore * p.seaDepth - shelf * underwaterNoise;
+  const finalHeight = coast > -0.012 ? Math.max(0, height) : seabed;
   return { height: finalHeight, land, coast, slopeHint: 0 };
 }
-
 function computeWeights(height: number, land: number, slope: number, p: IslandSettings) {
   const sand = clamp((1 - smoothstep(p.beachHeight * 0.5, p.beachHeight * 4.2, height)) * (0.45 + land * 0.55));
   const rock = clamp((slope - p.rockSlope) * 3.2 + smoothstep(p.maxHeight * 0.48, p.maxHeight * 0.9, height) * p.mountains * 0.38);
@@ -421,7 +469,6 @@ export function generateIsland(p: IslandSettings): TerrainData {
       const sample = sampleTerrain(nx, ny, p);
       heights[idx] = sample.height;
       land[idx] = sample.land;
-      vegetationMask[idx] = sample.land > 0.5 && sample.height > p.beachHeight * 2 ? 1 : 0;
       if (sample.land > 0.2) landCount++;
       minHeight = Math.min(minHeight, sample.height);
       maxHeight = Math.max(maxHeight, sample.height);
@@ -445,6 +492,10 @@ export function generateIsland(p: IslandSettings): TerrainData {
     blendWeights.set(weights, idx * 4);
     const variation = fbm(x / n * 8, y / n * 8, p.seed + 991, 3);
     colors.set(materialColor(weights, variation), idx * 3);
+    const inlandGrowth = smoothstep(p.beachHeight * 0.65, p.beachHeight * 3.2, h);
+    const slopeLimit = 1 - smoothstep(0.48, 1.25, slope);
+    const patch = 0.78 + Math.max(0, variation + 0.5) * 0.22;
+    vegetationMask[idx] = clamp(inlandGrowth * slopeLimit * land[idx] * patch);
     positions[idx * 3 + 2] = h;
   }
   minHeight = Infinity;
@@ -484,27 +535,39 @@ export function generateIsland(p: IslandSettings): TerrainData {
   const props: number[] = [];
   const propTarget = treeTarget + rockTarget;
   let attempts = 0, treePlaced = 0, rockPlaced = 0;
-  while (props.length / 6 < propTarget && attempts < propTarget * 15) {
+  while (props.length / 6 < propTarget && attempts < propTarget * 22) {
     attempts++;
     const x = rng() * p.worldSize - half, y = rng() * p.worldSize - half;
-    const nx = x / half, ny = y / half;
-    const sample = sampleTerrain(nx, ny, p);
-    if (sample.land < 0.48 || sample.height < p.beachHeight * 2) continue;
-    const isRock = rockPlaced < rockTarget && (treePlaced >= treeTarget || rng() > 0.72);
-    if (isRock) rockPlaced++; else treePlaced++;
-    const scale = isRock ? 0.6 + rng() * 2 : 0.75 + rng() * 0.75;
-    props.push(x, y, sample.height, scale, rng() * Math.PI * 2, isRock ? 1 : 0);
+    const gx = Math.max(1, Math.min(n - 2, Math.round((x + half) / cell)));
+    const gy = Math.max(1, Math.min(n - 2, Math.round((y + half) / cell)));
+    const idx = gy * n + gx;
+    const h = heights[idx], vegDensity = vegetationMask[idx];
+    const dx = (heights[idx + 1] - heights[idx - 1]) / (2 * cell);
+    const dy = (heights[idx + n] - heights[idx - n]) / (2 * cell);
+    const slope = Math.hypot(dx, dy);
+    if (land[idx] < 0.58 || h < p.beachHeight * 1.35) continue;
+    const wantsRock = slope > p.rockSlope * 0.75 || vegDensity < 0.25 || rng() > 0.88;
+    const isRock = wantsRock && rockPlaced < rockTarget;
+    if (isRock) rockPlaced++;
+    else {
+      if (treePlaced >= treeTarget || vegDensity < 0.2 || slope > 1.05) continue;
+      treePlaced++;
+    }
+    const scale = isRock ? 0.65 + rng() * 1.85 : 0.78 + rng() * 0.72;
+    props.push(x, y, h, scale, rng() * Math.PI * 2, isRock ? 1 : 0);
   }
 
-  const grassTarget = Math.min(30000, Math.round(landAreaHa * 10000 * p.grassDensity * 0.22));
+  const grassTarget = Math.min(45000, Math.round(landAreaHa * 10000 * p.grassDensity * 0.14));
   const grass: number[] = [];
   attempts = 0;
-  while (grass.length / 4 < grassTarget && attempts < grassTarget * 7) {
+  while (grass.length / 4 < grassTarget && attempts < grassTarget * 12) {
     attempts++;
     const x = rng() * p.worldSize - half, y = rng() * p.worldSize - half;
-    const sample = sampleTerrain(x / half, y / half, p);
-    if (sample.land < 0.5 || sample.height < p.beachHeight * 1.5) continue;
-    grass.push(x, y, sample.height, 0.6 + rng() * 1.2);
+    const gx = Math.max(1, Math.min(n - 2, Math.round((x + half) / cell)));
+    const gy = Math.max(1, Math.min(n - 2, Math.round((y + half) / cell)));
+    const idx = gy * n + gx;
+    if (land[idx] < 0.52 || vegetationMask[idx] < 0.3 || heights[idx] < p.beachHeight * 1.1) continue;
+    grass.push(x, y, heights[idx], 0.55 + rng() * 1.25);
   }
 
   return {
