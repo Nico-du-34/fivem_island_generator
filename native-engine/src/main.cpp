@@ -452,8 +452,9 @@ void addPropEntities(MapData& map, const Terrain& terrain, const JsonValue& para
             static_cast<float>(number(asset, "y", terrain.originY)),
             static_cast<float>(number(asset, "z", 0))
         };
-        const float heading = static_cast<float>(number(asset, "heading", 0));
-        entity.rotation = {0, 0, std::sin(heading * 0.5f), std::cos(heading * 0.5f)};
+        const float headingDegrees = static_cast<float>(number(asset, "heading", 0));
+        const float headingRadians = headingDegrees * 0.01745329251994329577f;
+        entity.rotation = {0, 0, std::sin(headingRadians * 0.5f), std::cos(headingRadians * 0.5f)};
         entity.scale_xy = std::clamp(static_cast<float>(number(asset, "scale", 1)), 0.05f, 50.0f);
         entity.scale_z = entity.scale_xy;
         entity.lod_dist = 220;
