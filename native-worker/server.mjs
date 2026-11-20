@@ -20,6 +20,11 @@ const jobs = new Map();
 const queue = [];
 let active = false;
 
+if (!["127.0.0.1", "::1", "localhost"].includes(HOST) && !process.env.ISLAND_EXPORT_BRIDGE_TOKEN) {
+  console.error("A custom ISLAND_EXPORT_BRIDGE_TOKEN is required when the worker is not bound to loopback.");
+  process.exit(1);
+}
+
 await mkdir(ROOT, { recursive: true });
 
 function json(res, status, body) {
