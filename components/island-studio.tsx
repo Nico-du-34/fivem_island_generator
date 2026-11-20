@@ -459,12 +459,13 @@ export default function IslandStudio() {
       heights: data.heights.length,
       blendWeights: data.blendWeights.length,
       vegetationMask: data.vegetationMask.length,
+      land: data.land.length,
       props: data.props.length,
       grass: data.grass.length,
     };
     const packed = new Float32Array(Object.values(counts).reduce((total, count) => total + count, 0));
     let offset = 0;
-    for (const array of [data.heights, data.blendWeights, data.vegetationMask, data.props, data.grass]) {
+    for (const array of [data.heights, data.blendWeights, data.vegetationMask, data.land, data.props, data.grass]) {
       packed.set(array, offset);
       offset += array.length;
     }
@@ -487,6 +488,7 @@ export default function IslandStudio() {
       heightsCount: counts.heights,
       blendCount: counts.blendWeights,
       vegetationCount: counts.vegetationMask,
+      landCount: counts.land,
       propsCount: counts.props,
       grassCount: counts.grass,
       data: btoa(binary),
@@ -562,7 +564,7 @@ export default function IslandStudio() {
         const percent = job.total ? Math.round((job.done / job.total) * 100) : 0;
         setExportProgress(percent);
         setExportStatus(job.stage || "Conversion CodeWalker…");
-        if (job.state !== "running") break;
+        if (job.state === "done" || job.state === "error") break;
       }
       if (!job || job.state === "error") throw new Error(job?.error || job?.message || "Échec de la conversion.");
       const fileResponse = await fetch("/api/export/jobs/" + jobId + "/file");
@@ -576,7 +578,9 @@ export default function IslandStudio() {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-      setNotice("Ressource FiveM exportée");
+      setNotice(job.nativeReady
+        ? "Export natif terminé"
+        : "Assets natifs exportés. Termine le YMAP XML dans CodeWalker avant le démarrage FiveM.");
     } catch (error) {
       console.error(error);
       setNotice(error instanceof Error ? error.message : "Export natif impossible");
