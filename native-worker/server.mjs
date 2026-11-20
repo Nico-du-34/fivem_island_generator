@@ -360,6 +360,13 @@ async function runQueue() {
 const server = createServer(async (req, res) => {
   if (!authorized(req)) return json(res, 401, { error: "Authentification du worker invalide." });
   const url = new URL(req.url || "/", "http://127.0.0.1");
+  if (req.method === "GET" && url.pathname === "/health") {
+    return json(res, 200, {
+      ok: true,
+      worker: "island-forge",
+      blenderAvailable: Boolean(BLENDER),
+    });
+  }
   if (req.method === "POST" && url.pathname === "/api/export/jobs") {
     let payload;
     try {
