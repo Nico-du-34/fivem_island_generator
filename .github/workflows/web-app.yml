@@ -24,8 +24,6 @@ jobs:
           cmake --build build/native --config Release --parallel 2
       - name: Check Windows worker JavaScript syntax
         run: node --check native-worker/server.mjs
-      - name: Check Blender worker Python syntax
-        run: python3 -m py_compile native-worker/blender/export_island.py
       - name: Smoke test npm run dev and local worker
         shell: bash
         run: |
@@ -48,7 +46,9 @@ jobs:
             cat /tmp/island-forge-dev.log
             exit 1
           fi
-          curl -fsS -H "Authorization: Bearer islandforge-local-development-only" http://127.0.0.1:8787/health | grep -q '"ok":true'
+          health=$(curl -fsS -H "Authorization: Bearer islandforge-local-development-only" http://127.0.0.1:8787/health)
+          echo "$health" | grep -q '"ok":true'
+          echo "$health" | grep -q '"blenderRequired":false'
       - name: Type check
         run: npm run typecheck
       - name: Build
