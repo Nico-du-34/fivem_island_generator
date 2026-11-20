@@ -504,7 +504,7 @@ def main():
     map_data.extents_manual = False
     group.refresh_ui()
 
-    progress("Export YDR/YBN/YTYP/YTD natifs et YMAP CodeWalker XML", 5)
+    progress("Export natif YDR/YBN/YMAP/YTYP/YTD via PyMateria", 5)
     result = bpy.ops.sollumz.export_assets(directory=str(output_assets), direct_export=True)
     if "FINISHED" not in result:
         raise RuntimeError("Sollumz a annulé l'export des assets : " + str(result))
@@ -587,21 +587,23 @@ def main():
             "ybn": [item for item in written if item.lower().endswith(".ybn")],
             "ytyp": [item for item in written if item.lower().endswith(".ytyp")],
             "ytd": [item for item in written if item.lower().endswith(".ytd")],
+            "ymap": [item for item in written if item.lower().endswith(".ymap")],
         },
         "ymapCodeWalkerXml": [item for item in written if item.lower().endswith(".ymap.xml")],
-        "ymapBinaryProduced": False,
+        "ymapBinaryProduced": any(item.lower().endswith(".ymap") for item in written),
+        "nativeExportBackend": "Sollumz + szio + PyMateria",
         "notes": [
-            "YMAP remains CodeWalker XML because the current Sollumz binary provider does not export YMAP.",
-            "Grass is retained in the source package but is not yet emitted as a native MapGrassBatch.",
+            "YMAP is written as a native RSC resource by the Sollumz/szio PyMateria provider.",
+            "Gen9 map data uses the shared native MapData writer exposed by the Gen9 provider fallback.",
+            "Grass is retained in the source package but is not yet emitted as a native MapGrassInstanceList.",
             "Water settings are retained as metadata; a native GTA water quad pass remains separate.",
         ],
     }
     (output_root / "blender-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-    if not report["binaryAssets"]["ydr"] or not report["binaryAssets"]["ybn"] or not report["binaryAssets"]["ytyp"]:
-        raise RuntimeError("Export incomplet : YDR, YBN ou YTYP binaire manquant. Voir blender-report.json.")
-    if not report["ymapCodeWalkerXml"]:
-        raise RuntimeError("Sollumz n'a pas généré de YMAP CodeWalker XML.")
-    progress("Assets natifs générés — conversion binaire YMAP à terminer dans CodeWalker", 7)
+    missing = [kind for kind in ("ydr", "ybn", "ytyp", "ytd", "ymap") if not report["binaryAssets"][kind]]
+    if missing:
+        raise RuntimeError("Export natif incomplet : assets manquants " + ", ".join(missing) + ". Voir blender-report.json.")
+    progress("YDR/YBN/YMAP/YTYP/YTD natifs générés via PyMateria", 7)
 
 
 if __name__ == "__main__":
