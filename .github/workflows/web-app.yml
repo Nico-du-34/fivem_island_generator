@@ -14,6 +14,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Install dependencies
         run: npm install
       - name: Check local development launcher syntax
@@ -24,6 +27,20 @@ jobs:
           cmake --build build/native --config Release --parallel 2
       - name: Verify native RAGE executable
         run: ./build/native/island-forge-native-engine --version
+      - name: Export and validate native gen8 fixture
+        run: |
+          python native-engine/tests/create_smoke_job.py --output build/smoke/gen8 --generation 8
+          ./build/native/island-forge-native-engine --job build/smoke/gen8/job.json --output build/smoke/gen8/out
+          for extension in ydr ybn ytd ytyp ymap; do
+            find build/smoke/gen8/out -type f -name "*.$extension" -print -quit | grep -q .
+          done
+      - name: Export and validate native gen9 fixture
+        run: |
+          python native-engine/tests/create_smoke_job.py --output build/smoke/gen9 --generation 9
+          ./build/native/island-forge-native-engine --job build/smoke/gen9/job.json --output build/smoke/gen9/out
+          for extension in ydr ybn ytd ytyp ymap; do
+            find build/smoke/gen9/out -type f -name "*.$extension" -print -quit | grep -q .
+          done
       - name: Check Windows worker JavaScript syntax
         run: node --check native-worker/server.mjs
       - name: Smoke test npm run dev and local worker
@@ -61,6 +78,9 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Configure native RAGE exporter
         run: cmake -S native-engine -B build/native -DCMAKE_BUILD_TYPE=Release
       - name: Compile Windows x64 exporter
@@ -72,3 +92,29 @@ jobs:
           if (!(Test-Path $binary)) { throw "Native exporter executable was not produced." }
           & $binary --version
           if ($LASTEXITCODE -ne 0) { throw "Native exporter version check failed." }
+      - name: Export and validate native gen8 fixture
+        shell: pwsh
+        run: |
+          python native-engine/tests/create_smoke_job.py --output build/smoke/gen8 --generation 8
+          if ($LASTEXITCODE -ne 0) { throw "Could not create gen8 smoke fixture." }
+          $output = "build/smoke/gen8/out"
+          & "build/native/Release/island-forge-native-engine.exe" --job "build/smoke/gen8/job.json" --output $output
+          if ($LASTEXITCODE -ne 0) { throw "Native gen8 export failed." }
+          foreach ($extension in @("ydr", "ybn", "ytd", "ytyp", "ymap")) {
+            if (!(Get-ChildItem -Path $output -Filter "*.$extension" -Recurse | Select-Object -First 1)) {
+              throw "Native gen8 export missing .$extension"
+            }
+          }
+      - name: Export and validate native gen9 fixture
+        shell: pwsh
+        run: |
+          python native-engine/tests/create_smoke_job.py --output build/smoke/gen9 --generation 9
+          if ($LASTEXITCODE -ne 0) { throw "Could not create gen9 smoke fixture." }
+          $output = "build/smoke/gen9/out"
+          & "build/native/Release/island-forge-native-engine.exe" --job "build/smoke/gen9/job.json" --output $output
+          if ($LASTEXITCODE -ne 0) { throw "Native gen9 export failed." }
+          foreach ($extension in @("ydr", "ybn", "ytd", "ytyp", "ymap")) {
+            if (!(Get-ChildItem -Path $output -Filter "*.$extension" -Recurse | Select-Object -First 1)) {
+              throw "Native gen9 export missing .$extension"
+            }
+          }
