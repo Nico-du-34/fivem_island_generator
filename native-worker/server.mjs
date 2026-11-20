@@ -289,7 +289,6 @@ async function processJob(job) {
     generation,
     nativeReady,
     nativeExportBackend: "Sollumz + szio + PyMateria",
-    nativeReady,
     binaryAssets: {
       ydr: count(".ydr"), ybn: count(".ybn"), ytyp: count(".ytyp"), ytd: count(".ytd"),
       ymap: count(".ymap"),
