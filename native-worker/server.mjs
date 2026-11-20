@@ -9,7 +9,6 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(process.env.ISLAND_WORKER_DATA || "./island-worker-data");
 const SCRIPT = fileURLToPath(new URL("./blender/export_island.py", import.meta.url));
-const FINALIZER = fileURLToPath(new URL("./finalize-ymap.ps1", import.meta.url));
 const BLENDER = process.env.BLENDER_PATH || "";
 const TOKEN = process.env.ISLAND_EXPORT_BRIDGE_TOKEN || "";
 const PORT = Number(process.env.ISLAND_EXPORT_BRIDGE_PORT || 8787);
@@ -196,23 +195,33 @@ async function processJob(job) {
   });
 
   const files = await collectFiles(artifacts);
-  const nativeExts = new Set([".ydr", ".ybn", ".ytyp", ".ytd"]);
+  const nativeExts = new Set([".ydr", ".ybn", ".ytyp", ".ytd", ".ymap"]);
   const cwMapFiles = files.filter((path) => path.toLowerCase().endsWith(".ymap.xml"));
   const nativeFiles = files.filter((path) => nativeExts.has(extname(path).toLowerCase()));
+  const nativeMapFiles = files.filter((path) => extname(path).toLowerCase() === ".ymap");
   const count = (ext) => files.filter((path) => extname(path).toLowerCase() === ext).length;
-  if (count(".ydr") < 1 || count(".ybn") < 1 || count(".ytyp") < 1) {
+  const requiredTypes = [".ydr", ".ybn", ".ytyp", ".ytd", ".ymap"];
+  const missingTypes = requiredTypes.filter((ext) => count(ext) < 1);
+  if (missingTypes.length) {
     const log = result.stderr.slice(-4000) || result.stdout.slice(-4000);
-    throw new Error("Sollumz n'a pas produit les YDR/YBN/YTYP binaires attendus. " + log);
+    throw new Error(
+      "Le backend natif Sollumz/PyMateria n'a pas produit tous les fichiers GTA attendus. " +
+      "Manquants : " + missingTypes.join(", ") + ". " + log
+    );
   }
-  if (cwMapFiles.length < 1) throw new Error("Aucun YMAP CodeWalker XML n'a été généré.");
+  for (const path of nativeMapFiles) {
+    const header = (await readFile(path)).subarray(0, 4).toString("ascii");
+    if (header !== "RSC7") {
+      throw new Error("Le fichier .ymap généré ne possède pas l'en-tête RSC7 : " + relative(artifacts, path));
+    }
+  }
 
   await updateJob(job, { stage: "Assemblage de la ressource FiveM", done: 6, total: 7 });
   const packageDir = join(job.dir, "package");
   const streamDir = join(packageDir, "stream");
-  const cwDir = join(packageDir, "codewalker");
   const reportDir = join(packageDir, "report");
   const configDir = join(packageDir, "config");
-  for (const folder of [streamDir, cwDir, reportDir, configDir]) await mkdir(folder, { recursive: true });
+  for (const folder of [streamDir, reportDir, configDir]) await mkdir(folder, { recursive: true });
 
   for (const file of files) {
     const ext = extname(file).toLowerCase();
@@ -222,12 +231,15 @@ async function processJob(job) {
       await mkdir(dirname(destination), { recursive: true });
       await writeFile(destination, await readFile(file));
     } else if (file.toLowerCase().endsWith(".ymap.xml") || file.toLowerCase().endsWith(".ytyp.xml")) {
-      const destination = join(cwDir, relativeFile.replace(/[\\/]/g, "_"));
+      // Keep the optional CodeWalker XML as an editable source beside the game-ready binaries.
+      const sourceDir = join(packageDir, "sources", "cwxml");
+      await mkdir(sourceDir, { recursive: true });
+      const destination = join(sourceDir, relativeFile.replace(/[\\/]/g, "_"));
       await writeFile(destination, await readFile(file));
     }
   }
 
-  const nativeReady = false;
+  const nativeReady = nativeMapFiles.length > 0 && requiredTypes.every((ext) => count(ext) > 0);
   const manifest = [
     "fx_version 'cerulean'",
     "game 'gta5'",
@@ -245,40 +257,45 @@ async function processJob(job) {
     resource: job.meta.params.name,
     generation,
     nativeAssets: nativeFiles.map((path) => relative(artifacts, path)),
+    ymapBinary: nativeMapFiles.map((path) => relative(artifacts, path)),
     ymapCodeWalkerXml: cwMapFiles.map((path) => relative(artifacts, path)),
+    exportBackend: "Sollumz + szio + PyMateria",
     counts: {
       ydr: count(".ydr"), ybn: count(".ybn"), ytyp: count(".ytyp"), ytd: count(".ytd"),
-      ymapXml: cwMapFiles.length,
+      ymap: count(".ymap"), ymapXml: cwMapFiles.length,
     },
     nativeReady,
-    manualCodeWalkerFinalizeRequired: true,
-    reason: "Sollumz exports YMAP in CodeWalker XML; binary YMAP conversion must be completed in CodeWalker.",
+    manualCodeWalkerFinalizeRequired: false,
+    reason: "The native PyMateria provider writes the YMAP RSC resource directly. CodeWalker is optional for inspection/editing.",
   }, null, 2));
   await writeFile(join(packageDir, "README_INSTALL.txt"), [
-    "ISLAND FORGE — WINDOWS NATIVE ASSET EXPORT",
+    "ISLAND FORGE — NATIVE FIVEM MAP",
     "",
-    "The worker generated native YDR, YBN, YTYP and YTD assets for " + generation + ".",
-    "The YMAP placement file is in codewalker/ as CodeWalker XML, not as a binary .ymap.",
+    "The worker generated native YDR, YBN, YMAP, YTYP and YTD assets for " + generation + ".",
+    "The YMAP is already a native RSC7 resource and is included in stream/.",
+    "The optional CodeWalker XML source is included under sources/cwxml/ when available.",
     "",
-    "FINAL STEP REQUIRED:",
-    "1. Open the matching .ymap.xml file in CodeWalker.",
-    "2. Save/export it as binary .ymap for the same GTA generation.",
-    "3. Copy the binary .ymap into stream/ alongside the native assets.",
-    "4. Confirm every YTYP referenced by the YMAP and every drawable/texture dictionary exists.",
-    "5. Test the resource on a clean FiveM server before deployment.",
+    "INSTALLATION:",
+    "1. Copy this folder into your FiveM resources directory.",
+    "2. Add the resource name to server.cfg with ensure " + job.meta.params.name + ".",
+    "3. Check that referenced GTA tree/rock archetypes exist on the target server build.",
+    "4. Inspect the map in CodeWalker if desired, then test it on a clean FiveM server.",
     "",
-    "Do not start this resource as a complete map before the binary YMAP has been finalized.",
+    "The export report records the native asset counts and known limitations.",
   ].join("\n") + "\n");
 
   await writeFile(join(reportDir, "export-report.json"), JSON.stringify({
     generatedAt: new Date().toISOString(),
     generation,
     nativeReady,
+    nativeExportBackend: "Sollumz + szio + PyMateria",
+    nativeReady,
     binaryAssets: {
       ydr: count(".ydr"), ybn: count(".ybn"), ytyp: count(".ytyp"), ytd: count(".ytd"),
+      ymap: count(".ymap"),
     },
-    ymapXml: cwMapFiles.length,
-    note: "Binary YMAP finalization in CodeWalker is still required.",
+    ymapCodeWalkerXml: cwMapFiles.length,
+    note: "YMAP is emitted as native RSC7 by PyMateria. CodeWalker XML is included only as an optional source.",
   }, null, 2));
 
   // Preserve the Blender-side diagnostics and source-side manifests in the delivered resource.
@@ -286,7 +303,6 @@ async function processJob(job) {
   if (await stat(blenderReport).then(() => true).catch(() => false)) {
     await copyFile(blenderReport, join(reportDir, "blender-report.json"));
   }
-  await copyFile(FINALIZER, join(packageDir, "finalize-ymap.ps1"));
   for (const name of ["materials.json", "vegetation-placements.json", "grass-placements.json", "water.json"]) {
     const source = join(artifacts, "config", name);
     if (await stat(source).then(() => true).catch(() => false)) {
@@ -314,8 +330,8 @@ async function processJob(job) {
   const zipPath = join(job.dir, "island-forge-" + generation + ".zip");
   const zipInfo = await stat(zipPath);
   await updateJob(job, {
-    state: "done", stage: "Export terminé — finalisation YMAP CodeWalker requise",
-    done: 7, total: 7, nativeReady, warning: "Les YDR/YBN/YTYP/YTD sont natifs. Le YMAP reste en XML et doit être converti dans CodeWalker.",
+    state: "done", stage: "Export natif YDR/YBN/YMAP/YTYP/YTD terminé",
+    done: 7, total: 7, nativeReady, warning: null,
     file: zipPath, fileSize: zipInfo.size,
   });
 }
