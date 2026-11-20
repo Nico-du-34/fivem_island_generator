@@ -455,14 +455,65 @@ function Ocean({ size, visible, waves }: { size: number; visible: boolean; waves
   const material = useMemo(() => new THREE.ShaderMaterial({
     transparent: true,
     uniforms: { uTime: { value: 0 }, uWaves: { value: waves ? 1 : 0 } },
-    vertexShader: `varying vec2 vUv; uniform float uTime; uniform float uWaves;
-      void main(){ vUv=uv; vec3 p=position; p.z += sin(p.x*0.0018+uTime*0.6)*0.25*uWaves + cos(p.y*0.0024-uTime*0.4)*0.18*uWaves; gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0); }`,
-    fragmentShader: `varying vec2 vUv; uniform float uTime;
-      void main(){ float w=sin(vUv.x*80.0+uTime)*0.025+cos(vUv.y*68.0-uTime*0.7)*0.02; vec3 c=mix(vec3(0.015,0.12,0.20),vec3(0.035,0.38,0.47),clamp(vUv.y*0.7+0.25+w,0.0,1.0)); gl_FragColor=vec4(c,0.94); }`,
+    vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vWorldPosition;
+      varying float vWave;
+      uniform float uTime;
+      uniform float uWaves;
+      void main() {
+        vUv = uv;
+        vec3 p = position;
+        float a = sin(p.x * 0.0017 + uTime * 0.55);
+        float b = cos(p.y * 0.0022 - uTime * 0.42);
+        float c = sin((p.x + p.y) * 0.004 + uTime * 0.22);
+        p.z += (a * 0.32 + b * 0.22 + c * 0.08) * uWaves;
+        vWave = a * 0.5 + b * 0.35 + c * 0.15;
+        vec4 world = modelMatrix * vec4(p, 1.0);
+        vWorldPosition = world.xyz;
+        gl_Position = projectionMatrix * viewMatrix * world;
+      }
+    `,
+    fragmentShader: `
+      precision highp float;
+      varying vec2 vUv;
+      varying vec3 vWorldPosition;
+      varying float vWave;
+      uniform float uTime;
+      void main() {
+        vec2 uv = vWorldPosition.xy * 0.0013;
+        float longWave = sin(uv.x * 5.5 + uv.y * 2.1 + uTime * 0.24);
+        float crossWave = cos(uv.y * 6.8 - uv.x * 1.7 - uTime * 0.18);
+        float ripples = sin(uv.x * 26.0 + uTime * 0.55) * cos(uv.y * 21.0 - uTime * 0.42);
+        float caustics = smoothstep(0.46, 0.93, longWave * crossWave * 0.5 + 0.5 + ripples * 0.08);
+        vec3 deep = vec3(0.012, 0.075, 0.105);
+        vec3 coastal = vec3(0.035, 0.235, 0.245);
+        vec3 surface = vec3(0.07, 0.34, 0.34);
+        float depthGradient = clamp(0.30 + vUv.y * 0.28 + vWave * 0.1, 0.0, 1.0);
+        vec3 water = mix(deep, coastal, depthGradient);
+        water = mix(water, surface, caustics * 0.16);
+        vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+        float fresnel = pow(1.0 - max(dot(viewDirection, vec3(0.0, 0.0, 1.0)), 0.0), 3.0);
+        water = mix(water, vec3(0.31, 0.58, 0.55), fresnel * 0.28);
+        water += vec3(0.015, 0.026, 0.028) * max(vWave, 0.0);
+        gl_FragColor = vec4(water, 0.96);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
     depthWrite: false,
-  }), [waves]);
-  useFrame((state) => { material.uniforms.uTime.value = state.clock.elapsedTime; });
-  return <mesh position={[0, 0, -0.5]} visible={visible}><planeGeometry args={[size * 1.8, size * 1.8]} /><primitive object={material} attach="material" /></mesh>;
+    toneMapped: true,
+  }), []);
+  useFrame((state) => {
+    material.uniforms.uTime.value = state.clock.elapsedTime;
+    material.uniforms.uWaves.value = waves ? 1 : 0;
+  });
+  return (
+    <mesh position={[0, 0, 0]} visible={visible}>
+      <planeGeometry args={[size * 1.8, size * 1.8, 1, 1]} />
+      <primitive object={material} attach="material" />
+    </mesh>
+  );
 }
 
 function Player({
