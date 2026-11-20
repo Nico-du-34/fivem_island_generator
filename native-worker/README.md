@@ -1,84 +1,71 @@
-# Island Forge — Windows native export worker
+# Island Forge — worker local d'export GTA natif
 
-This worker runs beside Windows Blender + Sollumz. The browser sends a validated terrain payload; the worker reconstructs GTA-coordinate meshes, creates Sollumz scene assets, and exports native RAGE resources through the PyMateria backend used by Sollumz/szio.
+Le worker est démarré automatiquement avec l'application. Il reçoit les buffers du terrain, reconstruit les maillages Blender et exporte les ressources GTA natives avec Sollumz/szio + PyMateria.
 
-## What it produces
+## Démarrage sans configuration
 
-- **YDR** visual terrain drawables, split into streaming tiles.
-- **YBN** coarse BVH collision per high-detail terrain tile.
-- **YTYP** archetype definitions for every terrain tile and LOD.
-- **YTD** texture dictionaries containing the selected material maps.
-- **YMAP** native RSC7 map data with tile placements, HD/LOD/SLOD hierarchy and configured tree/rock archetype placements.
-- Optional **CodeWalker XML** copies under sources/cwxml/ for inspection/editing.
-- FiveM fxmanifest.lua, native-export report, texture/material and placement metadata.
+Prérequis sur Windows 10/11 :
+- Node.js 20+
+- Blender 4.5+ recommandé
+- Sollumz installé dans le profil Blender utilisé
+- PyMateria disponible pour Sollumz/szio
 
-The terrain is split into six streaming levels per tile: HD, LOD, SLOD1, SLOD2, SLOD3 and SLOD4. Collision is separate from render geometry. Trees and rocks reference existing GTA archetypes; the worker does not bundle those GTA props.
+Depuis la racine du dépôt :
 
-## YMAP: native export, no manual conversion
+~~~powershell
+npm install
+npm run dev
+~~~
 
-The worker does **not** stop at YMAP XML. Sollumz builds an AssetMapData object and exports it through szio's native PyMateria provider. That provider writes the .ymap RSC resource directly. The worker then reopens every generated native YMAP through szio's try_load_asset reader and rejects the job if the resource cannot be read back or contains no entities.
+Ouvre ensuite http://localhost:3000. Le script scripts/run-local.mjs :
+1. cherche automatiquement blender.exe dans les installations Windows habituelles ou dans le PATH ;
+2. détecte l'extension Sollumz dans le profil Blender ;
+3. démarre native-worker/server.mjs sur 127.0.0.1:8787 ;
+4. démarre Next.js dans le même terminal ;
+5. arrête le worker quand Next.js s'arrête.
 
-The szio project includes a native AssetMapData round-trip test and its native provider calls PyMateria MapData.export_rsc. Gen9 uses the shared native MapData writer through the provider fallback. References:
+Aucun fichier .env, token à copier ou second terminal n'est requis. npm start utilise le même démarrage automatique après npm run build. Pour démarrer uniquement le worker, lance npm run worker.
+
+Si Blender n'est pas trouvé, l'éditeur et l'export source OBJ/GLB restent utilisables. Le bouton d'export natif retournera une erreur claire tant que Blender et Sollumz ne sont pas installés.
+
+Le worker local écoute uniquement sur 127.0.0.1. Ne le rends pas accessible publiquement. La configuration d'une machine de conversion distante est un déploiement avancé et n'est pas nécessaire au développement local.
+
+## Fichiers générés
+
+- **YDR** terrain visuel en tuiles.
+- **YBN** collisions BVH indépendantes.
+- **YTYP** archetypes de terrain et LOD.
+- **YTD** dictionnaires diffuse/normal.
+- **YMAP** natif RSC7 avec placements HD/LOD/SLOD et arbres/rochers.
+- Sources CodeWalker XML facultatives pour inspection.
+- fxmanifest.lua, rapports et manifests matériaux/eau/végétation/herbe.
+
+Le terrain comprend six niveaux visuels : HD, LOD, SLOD1, SLOD2, SLOD3 et SLOD4. Les collisions sont séparées du rendu. Les arbres et rochers référencent des archétypes déjà présents dans le jeu ; le worker ne copie pas les assets du jeu.
+
+## Validation YMAP native
+
+Sollumz construit un AssetMapData, l'exporte avec le fournisseur natif PyMateria et relit ensuite chaque fichier via szio.try_load_asset. L'export échoue si le YMAP est absent, illisible, ne possède pas d'en-tête RSC7 ou ne contient aucune entité.
+
+Le projet szio contient un test de round-trip natif AssetMapData :
+- https://github.com/Sollumz/szio/blob/main/tests/test_maps.py
 - https://github.com/Sollumz/szio/blob/main/src/szio/gta5/native/provider.py
 - https://github.com/Sollumz/szio/blob/main/src/szio/gta5/native/provider_gen9.py
-- https://github.com/Sollumz/szio/blob/main/tests/test_maps.py
 
-CodeWalker is optional for inspecting/editing the generated .ymap afterwards. It is not required to convert the worker output. The package is marked nativeReady only after YDR/YBN/YMAP/YTYP/YTD exist, every YMAP starts with RSC7, and szio can reopen each YMAP.
+CodeWalker est facultatif pour inspecter ou modifier les YMAP ; il n'est pas requis pour la conversion binaire.
 
-## Requirements
+## Textures GunWare
 
-- Windows 10/11 x64.
-- Node.js 20+.
-- Blender 4.0+ (Blender 4.5/5.x recommended).
-- Sollumz 2.9.1 or newer installed in that Blender profile.
-- PyMateria available to Blender through the Sollumz/szio installation for native Gen8/Gen9 resources.
-- CodeWalker is optional for map inspection.
-- GTA texture images are optional. The worker creates procedural fallback diffuse/normal maps if GUNWARE_TEXTURE_DIR is not set or a selected image is missing.
+Les fichiers de référence fournis avec Island Forge contenaient les noms des dictionnaires de textures GTA, mais pas les bitmaps diffuse/normal originaux. Sans images de remplacement, le worker génère des PNG procéduraux de secours, les ajoute au YTD et les assigne aux matériaux. Ces PNG ne sont pas les textures GunWare originales.
 
-Sollumz and PyMateria must be configured in the same Blender installation referenced by BLENDER_PATH. Installing the addon in a different Blender version does not configure this worker.
+Pour fournir des images localement, place les fichiers sous native-worker/textures avec les noms :
+- <material-id>_diffuse.png
+- <material-id>_normal.png
 
-## Configuration
+Le worker détectera ce dossier sans configuration supplémentaire. Les textures originales extraites du jeu doivent être obtenues et utilisées conformément aux droits applicables.
 
-Set these Windows environment variables before starting the worker:
+## Limites actuelles
 
-~~~powershell
-$env:BLENDER_PATH = "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"
-$env:SOLLUMZ_ADDON_PATH = "$env:APPDATA\Blender Foundation\Blender\4.5\scripts\addons\Sollumz"
-$env:SOLLUMZ_ADDON_MODULE = "Sollumz"
-$env:ISLAND_EXPORT_BRIDGE_TOKEN = "replace-with-a-long-random-secret"
-$env:ISLAND_EXPORT_BRIDGE_PORT = "8787"
-$env:ISLAND_WORKER_DATA = "D:\IslandForge\jobs"
-# Optional: legally available diffuse/normal replacements named <material-id>_diffuse.png / <material-id>_normal.png
-$env:GUNWARE_TEXTURE_DIR = "D:\IslandForge\textures"
-node .\server.mjs
-~~~
-
-If Sollumz is already installed and enabled in the Blender profile, SOLLUMZ_ADDON_PATH may be omitted. The worker still checks that PyMateria's native provider is available before running an export.
-
-On the Next.js deployment, set:
-
-~~~dotenv
-ISLAND_EXPORT_BRIDGE_URL=http://WINDOWS_WORKER_LAN_IP:8787
-ISLAND_EXPORT_BRIDGE_TOKEN=the-same-long-random-secret
-~~~
-
-Keep this endpoint private. Use a LAN/VPN/firewall rule; do not expose the worker port to the public internet.
-
-## Start and check
-
-~~~powershell
-.\start-worker.ps1
-~~~
-
-The service is intentionally single-worker: one Blender conversion runs at a time. Jobs are stored below ISLAND_WORKER_DATA; poll and download through the existing Next.js proxy endpoints.
-
-## Texture behaviour
-
-The supplied GunWare source bundle contained GTA texture dictionary names, not the original source bitmaps. If GUNWARE_TEXTURE_DIR contains matching diffuse/normal replacements, the worker uses them. Otherwise it creates fallback PNG maps from the chosen material tints and procedural noise, packs them into YTD and uses them for YDR shader materials. These fallback images are not original GunWare/GTA bitmaps.
-
-## Current limitations
-
-- Native GTA water quads are not generated yet; water configuration is included in config/water.json.
-- Grass placement data is preserved in config/grass-placements.json, but not yet emitted as a native YMAP grass instance list.
-- Trees and rocks reference built-in GTA archetype names; verify those archetypes exist in the target game build/custom asset pack.
-- CodeWalker/FiveM runtime validation remains recommended before production deployment.
+- Les water quads GTA natifs ne sont pas générés ; les paramètres d'eau sont conservés dans config/water.json.
+- Les placements d'herbe sont conservés dans config/grass-placements.json, mais ne sont pas encore écrits comme YMAP grass instance lists natives.
+- Les arbres/rochers référencent des archétypes GTA existants à vérifier sur le build cible.
+- Une inspection finale CodeWalker et un essai sur un serveur FiveM propre restent recommandés.
