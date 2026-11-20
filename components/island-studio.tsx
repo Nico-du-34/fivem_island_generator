@@ -406,7 +406,8 @@ function WorldPanel({
               <div className="gta-placed-fields">
                 <label>X<input type="number" step="1" value={Math.round(asset.x)} onChange={(event) => onUpdateAsset(asset.id, { x: Number(event.target.value) || 0 })} /></label>
                 <label>Y<input type="number" step="1" value={Math.round(asset.y)} onChange={(event) => onUpdateAsset(asset.id, { y: Number(event.target.value) || 0 })} /></label>
-                <label>Cap<input type="number" step="5" value={Math.round(asset.heading)} onChange={(event) => onUpdateAsset(asset.id, { heading: Number(event.target.value) || 0 })} /></label>
+                <label>Cap °<input type="number" step="5" value={Math.round(asset.heading)} onChange={(event) => onUpdateAsset(asset.id, { heading: Number(event.target.value) || 0 })} /></label>
+                <label>Z<input type="number" step="0.1" value={Number(asset.z.toFixed(1))} onChange={(event) => onUpdateAsset(asset.id, { z: Number(event.target.value) || 0 })} /></label>
                 <label>Échelle<input type="number" min="0.05" max="50" step="0.05" value={asset.scale} onChange={(event) => onUpdateAsset(asset.id, { scale: Math.max(0.05, Math.min(50, Number(event.target.value) || 1)) })} /></label>
               </div>
               <small className="gta-placed-coords">Coordonnées monde GTA · Z {asset.z.toFixed(1)} m</small>
@@ -532,26 +533,55 @@ export default function IslandStudio() {
     setSettings((current) => ({ ...current, originX: x, originY: y }));
   }, []);
 
+  const samplePlacedHeight = useCallback((worldX: number, worldY: number) => {
+    if (!terrain) return 0;
+    const localX = worldX - settings.originX;
+    const localY = worldY - settings.originY;
+    const gx = (localX + terrain.half) / terrain.cell;
+    const gy = (localY + terrain.half) / terrain.cell;
+    if (gx < 0 || gy < 0 || gx > terrain.n - 1 || gy > terrain.n - 1) return 0;
+    const ix = Math.min(terrain.n - 2, Math.max(0, Math.floor(gx)));
+    const iy = Math.min(terrain.n - 2, Math.max(0, Math.floor(gy)));
+    const fx = Math.max(0, Math.min(1, gx - ix));
+    const fy = Math.max(0, Math.min(1, gy - iy));
+    const a = terrain.heights[iy * terrain.n + ix];
+    const b = terrain.heights[iy * terrain.n + ix + 1];
+    const c = terrain.heights[(iy + 1) * terrain.n + ix];
+    const d = terrain.heights[(iy + 1) * terrain.n + ix + 1];
+    const north = a * (1 - fx) + b * fx;
+    const south = c * (1 - fx) + d * fx;
+    return north * (1 - fy) + south * fy;
+  }, [terrain, settings.originX, settings.originY]);
+
   const addPlacedAsset = useCallback((name: string) => {
+    const x = settings.originX;
+    const y = settings.originY;
     setPlacedAssets((current) => [...current, {
       id: crypto.randomUUID(),
       name,
-      x: settings.originX,
-      y: settings.originY,
-      z: 0,
+      x,
+      y,
+      z: samplePlacedHeight(x, y) + 0.15,
       heading: 0,
       scale: 1,
     }]);
     setNotice("Prop GTA ajouté à la liste de placement");
-  }, [settings.originX, settings.originY]);
+  }, [settings.originX, settings.originY, samplePlacedHeight]);
 
   const removePlacedAsset = useCallback((id: string) => {
     setPlacedAssets((current) => current.filter((asset) => asset.id !== id));
   }, []);
 
   const updatePlacedAsset = useCallback((id: string, patch: Partial<GtaPlacedAsset>) => {
-    setPlacedAssets((current) => current.map((asset) => asset.id === id ? { ...asset, ...patch } : asset));
-  }, []);
+    setPlacedAssets((current) => current.map((asset) => {
+      if (asset.id !== id) return asset;
+      const updated = { ...asset, ...patch };
+      if (patch.x !== undefined || patch.y !== undefined) {
+        updated.z = samplePlacedHeight(updated.x, updated.y) + 0.15;
+      }
+      return updated;
+    }));
+  }, [samplePlacedHeight]);
 
   const generate = useCallback(async (override?: IslandSettings) => {
     const nextSettings = { ...(override ?? settings) };
