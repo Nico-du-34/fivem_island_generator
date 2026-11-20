@@ -73,10 +73,10 @@ Requirements: Windows 10/11 x64, Node.js 20+, Blender 4.0+ (4.5 recommended), So
 3. Start the worker with start-worker.ps1.
 4. Configure the web app's .env:
 
-\`\`\`dotenv
+```dotenv
 ISLAND_EXPORT_BRIDGE_URL=http://WINDOWS_WORKER_LAN_IP:8787
 ISLAND_EXPORT_BRIDGE_TOKEN=the-same-long-random-secret
-\`\`\`
+```
 
 Keep the worker behind a LAN/VPN/firewall. The HTTP service refuses to start without a bearer token. It runs one Blender conversion at a time and stores temporary jobs under ISLAND_WORKER_DATA.
 
@@ -97,20 +97,20 @@ The supplied GunWare source files contained GTA texture dictionary names, not th
 
 Requirements: Node.js 20+.
 
-\`\`\`bash
+```bash
 npm install
 npm run dev
-\`\`\`
+```
 
 Open http://localhost:3000.
 
 ## Type check and production build
 
-\`\`\`bash
+```bash
 npm run typecheck
 npm run build
 npm start
-\`\`\`
+```
 
 ## Deploy
 
