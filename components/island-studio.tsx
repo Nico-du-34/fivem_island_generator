@@ -452,27 +452,49 @@ export default function IslandStudio() {
   };
 
   const encodeTerrainEdits = async (data: TerrainData) => {
-    const packed = new Float32Array(data.heights.length + data.blendWeights.length + data.vegetationMask.length);
-    packed.set(data.heights, 0);
-    packed.set(data.blendWeights, data.heights.length);
-    packed.set(data.vegetationMask, data.heights.length + data.blendWeights.length);
-    const raw = new Uint8Array(packed.buffer);
+    const segments = [
+      { name: "heights", type: "float32-le", count: data.heights.length, bytes: new Uint8Array(data.heights.buffer, data.heights.byteOffset, data.heights.byteLength) },
+      { name: "blendWeights", type: "float32-le", count: data.blendWeights.length, bytes: new Uint8Array(data.blendWeights.buffer, data.blendWeights.byteOffset, data.blendWeights.byteLength) },
+      { name: "land", type: "float32-le", count: data.land.length, bytes: new Uint8Array(data.land.buffer, data.land.byteOffset, data.land.byteLength) },
+      { name: "vegetationMask", type: "float32-le", count: data.vegetationMask.length, bytes: new Uint8Array(data.vegetationMask.buffer, data.vegetationMask.byteOffset, data.vegetationMask.byteLength) },
+      { name: "props", type: "float32-le", stride: 6, count: data.props.length, bytes: new Uint8Array(data.props.buffer, data.props.byteOffset, data.props.byteLength) },
+      { name: "grass", type: "float32-le", stride: 4, count: data.grass.length, bytes: new Uint8Array(data.grass.buffer, data.grass.byteOffset, data.grass.byteLength) },
+      { name: "indices", type: "uint32-le", count: data.indices.length, bytes: new Uint8Array(data.indices.buffer, data.indices.byteOffset, data.indices.byteLength) },
+      { name: "faceTiles", type: "uint16-le", count: data.faceTiles.length, bytes: new Uint8Array(data.faceTiles.buffer, data.faceTiles.byteOffset, data.faceTiles.byteLength) },
+      { name: "faceMaterials", type: "uint8", count: data.faceMaterials.length, bytes: new Uint8Array(data.faceMaterials.buffer, data.faceMaterials.byteOffset, data.faceMaterials.byteLength) },
+    ] as const;
+    let offset = 0;
+    const segmentMap: Record<string, { type: string; count: number; stride?: number; offset: number; byteLength: number }> = {};
+    for (const segment of segments) {
+      offset = Math.ceil(offset / 4) * 4;
+      segmentMap[segment.name] = {
+        type: segment.type, count: segment.count,
+        ...("stride" in segment ? { stride: segment.stride } : {}),
+        offset, byteLength: segment.bytes.byteLength,
+      };
+      offset += segment.bytes.byteLength;
+    }
+    const raw = new Uint8Array(offset);
+    for (const segment of segments) raw.set(segment.bytes, segmentMap[segment.name].offset);
     let bytes = raw;
+    let compression: "none" | "gzip" = "none";
     if ("CompressionStream" in window) {
       const compressed = new Blob([raw]).stream().pipeThrough(new CompressionStream("gzip"));
       bytes = new Uint8Array(await new Response(compressed).arrayBuffer());
+      compression = "gzip";
     }
     let binary = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, Math.min(bytes.length, i + 0x8000)));
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, Math.min(bytes.length, i + 0x8000)));
+    }
     return {
-      format: "float32-le",
-      compression: bytes === raw ? "none" : "gzip",
-      n: data.n,
-      cell: data.cell,
-      heightsCount: data.heights.length,
-      blendCount: data.blendWeights.length,
-      vegetationCount: data.vegetationMask.length,
-      data: btoa(binary),
+      format: "islandforge-binary-v2", endian: "little", compression,
+      n: data.n, cell: data.cell,
+      vertexCount: data.positions.length / 3,
+      triangleCount: data.indices.length / 3,
+      propCount: data.props.length / 6,
+      grassCount: data.grass.length / 4,
+      segments: segmentMap, data: btoa(binary),
     };
   };
 
