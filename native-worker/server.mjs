@@ -10,7 +10,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(process.env.ISLAND_WORKER_DATA || "./island-worker-data");
 const SCRIPT = fileURLToPath(new URL("./blender/export_island.py", import.meta.url));
 const BLENDER = process.env.BLENDER_PATH || "";
-const TOKEN = process.env.ISLAND_EXPORT_BRIDGE_TOKEN || "";
+const TOKEN = process.env.ISLAND_EXPORT_BRIDGE_TOKEN || "islandforge-local-development-only";
+const HOST = process.env.ISLAND_WORKER_HOST || "127.0.0.1";
 const PORT = Number(process.env.ISLAND_EXPORT_BRIDGE_PORT || 8787);
 const MAX_BODY = Number(process.env.ISLAND_WORKER_MAX_BODY || 256 * 1024 * 1024);
 const MAX_QUEUE = Number(process.env.ISLAND_WORKER_MAX_QUEUE || 8);
@@ -174,7 +175,7 @@ function runProcess(executable, args, cwd, onProgress) {
 }
 
 async function processJob(job) {
-  if (!BLENDER) throw new Error("BLENDER_PATH n'est pas configuré sur ce PC Windows.");
+  if (!BLENDER) throw new Error("Blender est introuvable. Installe Blender 4.5+, vérifie qu'il est dans le PATH, puis relance npm run dev.");
   const artifacts = join(job.dir, "artifacts");
   await mkdir(artifacts, { recursive: true });
   await updateJob(job, { state: "running", stage: "Préparation des maillages et matériaux", done: 1, total: 7, error: null });
@@ -403,11 +404,7 @@ const server = createServer(async (req, res) => {
   return json(res, 404, { error: "Route introuvable." });
 });
 
-if (!TOKEN) {
-  console.error("ISLAND_EXPORT_BRIDGE_TOKEN is required. Refusing to start without authentication.");
-  process.exit(1);
-}
-server.listen(PORT, "0.0.0.0", () => {
-  console.log("Island Forge Windows worker listening on :" + PORT);
-  console.log("Blender: " + (BLENDER || "(BLENDER_PATH missing)"));
+server.listen(PORT, HOST, () => {
+  console.log("Island Forge local export worker listening on " + HOST + ":" + PORT);
+  console.log("Blender: " + (BLENDER || "(not detected — source export remains available)"));
 });
