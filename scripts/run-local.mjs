@@ -44,7 +44,7 @@ async function installNativeEngine() {
   }
 
   const executable = process.platform === "win32"
-    ? "island-forge-native-engine-win-x64.exe"
+    ? "island-forge-native-engine.exe"
     : "island-forge-native-engine";
   const localPath = join(root, ".islandforge", "bin", executable);
   if (existsSync(localPath)) {
