@@ -173,7 +173,7 @@ function runProcess(executable, args, cwd, onProgress) {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) resolvePromise({ stdout, stderr });
-      else reject(new Error("Blender a quitté avec le code " + code + ".\n" + stderr.slice(-8000)));
+      else reject(new Error("Le moteur d’export natif a quitté avec le code " + code + ".\n" + stderr.slice(-8000)));
     });
   });
 }
