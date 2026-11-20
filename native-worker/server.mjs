@@ -1,7 +1,8 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile, copyFile } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { gunzipSync } from "node:zlib";
@@ -9,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(process.env.ISLAND_WORKER_DATA || "./island-worker-data");
 const SCRIPT = fileURLToPath(new URL("./blender/export_island.py", import.meta.url));
+const FINALIZER = fileURLToPath(new URL("./finalize-ymap.ps1", import.meta.url));
 const BLENDER = process.env.BLENDER_PATH || "";
 const TOKEN = process.env.ISLAND_EXPORT_BRIDGE_TOKEN || "";
 const PORT = Number(process.env.ISLAND_EXPORT_BRIDGE_PORT || 8787);
@@ -278,6 +280,21 @@ async function processJob(job) {
     },
     ymapXml: cwMapFiles.length,
     note: "Binary YMAP finalization in CodeWalker is still required.",
+  }, null, 2));
+
+  // Preserve the Blender-side diagnostics and source-side manifests in the delivered resource.
+  const blenderReport = join(artifacts, "blender-report.json");
+  if (await stat(blenderReport).then(() => true).catch(() => false)) {
+    await copyFile(blenderReport, join(reportDir, "blender-report.json"));
+  }
+  await copyFile(FINALIZER, join(packageDir, "finalize-ymap.ps1"));
+  await writeFile(join(configDir, "materials.json"), JSON.stringify(job.meta.materials || [], null, 2));
+  await writeFile(join(configDir, "worker-job.json"), JSON.stringify({
+    generation: job.generation,
+    params: job.meta.params,
+    terrain: job.meta.terrain,
+    options: job.meta.options,
+    counts: job.meta.counts,
   }, null, 2));
 
   const ps = [
