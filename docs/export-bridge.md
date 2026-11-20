@@ -1,19 +1,21 @@
 # Native export bridge contract
 
-The browser editor sends edited terrain buffers and selected GunWare material references to the local Windows worker in [native-worker/](../native-worker/). The worker uses Blender, Sollumz, szio and PyMateria to produce native YDR/YBN/YMAP/YTYP/YTD resources. The Next.js API routes proxy to 127.0.0.1:8787 by default. The worker reopens each native YMAP with szio before it marks the ZIP ready. CodeWalker is optional for inspection/editing, not required as a conversion step.
+The browser editor sends edited terrain buffers, selected material references and user-placed props to the local worker in [native-worker/](../native-worker/). The worker calls the integrated C++20 Island Forge Native Engine, based on Ragekit, to produce native YDR/YBN/YMAP/YTYP/YTD resources. The Next.js API routes proxy to 127.0.0.1:8787 by default. The engine reads the produced YMAP back with Ragekit and verifies its RSC7 header. Blender, Sollumz, PyMateria and CodeWalker are not required for conversion.
 
 ## Démarrage local sans .env
 
-Depuis la racine du dépôt, exécute :
+Depuis Windows 10/11 x64, à la racine du dépôt :
 
 ~~~powershell
 npm install
 npm run dev
 ~~~
 
-Le script scripts/run-local.mjs démarre Next.js et le worker local dans le même terminal. Il détecte Blender et Sollumz dans les emplacements Windows habituels. Les routes API utilisent automatiquement 127.0.0.1:8787 et un jeton réservé au loopback local. Aucun fichier .env n'est nécessaire.
+Le script scripts/run-local.mjs démarre Next.js et le worker local dans le même terminal. Il télécharge l'exécutable Windows Island Forge Native Engine depuis la release native-engine-v0.1.0 si le binaire n'est pas déjà présent dans .islandforge/bin/. Aucun fichier .env ni outil 3D externe n'est requis.
 
-Pour lancer uniquement le worker : npm run worker. Pour la procédure Windows et les prérequis, consulte [native-worker/README.md](../native-worker/README.md).
+Sur Linux/macOS, l'éditeur et l'export source restent utilisables ; le binaire natif publié est actuellement destiné à Windows x64. Le dossier local .islandforge/ est ignoré par Git.
+
+Pour lancer uniquement le worker : npm run worker. Pour les prérequis et les limites, consulte [native-worker/README.md](../native-worker/README.md).
 
 
 ## 1. Create a job
@@ -96,7 +98,7 @@ The edits binary is base64-encoded. Decode it, decompress gzip when compression 
 
 The counts object is authoritative for array boundaries. Validate the exact total byte size before allocating geometry. The legacy heightsCount, blendCount, vegetationCount, propsCount and grassCount fields are also included for compatibility.
 
-The materials array is ordered by terrain slot. diffuseTextureDictionary and normalTextureDictionary are **texture names**, not image bytes. The web source ZIP includes procedural fallback PNG maps for Blender preview, but these must not be mislabelled as original GunWare/GTA textures. The Windows worker reads replacement images from native-worker/textures using <material-id>_diffuse.png and <material-id>_normal.png. If no replacement images exist, it creates procedural fallback maps for the YTD. The supplied GunWare source files did not include original bitmap data.
+The materials array is ordered by terrain slot. diffuseTextureDictionary and normalTextureDictionary are **texture names**, not image bytes. The native engine generates procedural fallback textures for the YTD; they are not the original GunWare/GTA bitmaps. The supplied GunWare source files did not include original bitmap data.
 
 Successful response:
 

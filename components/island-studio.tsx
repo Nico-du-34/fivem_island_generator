@@ -8,7 +8,8 @@ import {
   Loader2, Map, MapPin, Maximize2, Mountain, Move, Paintbrush, Play,
   Redo2, RefreshCw, RotateCcw, Ruler, Sun, Trees, Undo2, Waves, X,
 } from "lucide-react";
-import GtaPlacementMap, { getPlacementVerdict, GTA_LOCATION_PRESETS } from "@/components/gta-placement-map";
+import { getPlacementVerdict, GTA_LOCATION_PRESETS } from "@/components/gta-placement-map";
+import GtaWorldView, { type GtaMapMode, type GtaMapStyle, type GtaPlacedAsset } from "@/components/gta-world-view";
 import {
   DEFAULT_SETTINGS, MATERIAL_OPTIONS, PRESETS, SHAPES, WORLD_SIZES,
   allowedCellSizes, allowedMeshCells, formatWorldSize,
@@ -212,21 +213,171 @@ function SurfacePanel({
   );
 }
 
+type GtaDataKind = "objects" | "vehicles" | "peds" | "weapons" | "zones" | "ipls" | "interiors";
+
+function GtaDataBrowser({
+  onAddAsset, onGoTo,
+}: {
+  onAddAsset: (name: string) => void;
+  onGoTo: (x: number, y: number) => void;
+}) {
+  const [kind, setKind] = useState<GtaDataKind>("objects");
+  const [query, setQuery] = useState("");
+  const [items, setItems] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const response = await fetch("/api/gta-data/" + kind + "?q=" + encodeURIComponent(query) + "&limit=40", {
+          signal: controller.signal,
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Chargement des données GTA impossible.");
+        setItems(Array.isArray(payload.items) ? payload.items : []);
+        setTotal(Number(payload.total) || 0);
+      } catch (cause) {
+        if (!controller.signal.aborted) {
+          setItems([]);
+          setError(cause instanceof Error ? cause.message : "Erreur de chargement.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [kind, query]);
+
+  const getPosition = (item: any) => {
+    if (kind === "zones") {
+      const bound = item.Bounds?.[0];
+      if (!bound?.Minimum || !bound?.Maximum) return null;
+      return {
+        x: Math.round((Number(bound.Minimum.X) + Number(bound.Maximum.X)) / 2),
+        y: Math.round((Number(bound.Minimum.Y) + Number(bound.Maximum.Y)) / 2),
+      };
+    }
+    const position = item.Position ?? item.position;
+    if (!position) return null;
+    return { x: Math.round(Number(position.X ?? position.x)), y: Math.round(Number(position.Y ?? position.y)) };
+  };
+
+  const title = (item: any) => {
+    if (["objects", "vehicles", "peds", "weapons"].includes(kind)) return item.name;
+    if (kind === "zones") return item.DisplayName || item.Name;
+    return item.name || item.Name;
+  };
+
+  return (
+    <Section title="Données du monde GTA">
+      <div className="gta-data-tabs">
+        {([
+          ["objects", "Props"],
+          ["vehicles", "Véhicules"],
+          ["peds", "Peds"],
+          ["weapons", "Armes"],
+          ["zones", "Zones"],
+          ["ipls", "IPL"],
+          ["interiors", "Intérieurs"],
+        ] as const).map(([id, label]) => (
+          <button key={id} type="button" className={kind === id ? "gta-data-tab is-active" : "gta-data-tab"} onClick={() => setKind(id)}>{label}</button>
+        ))}
+      </div>
+      <input
+        className="gta-data-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder={kind === "objects" ? "Rechercher un prop (prop_...)" : "Rechercher un nom, un hash, une zone..."}
+        aria-label="Rechercher dans les données GTA"
+      />
+      <div className="gta-data-meta">
+        {loading ? "Recherche…" : total.toLocaleString("fr-FR") + " résultats"}
+        <span>Source DurtyFree</span>
+      </div>
+      {error && <p className="gta-data-error">{error}</p>}
+      {!error && (
+        <div className="gta-data-results">
+          {items.slice(0, 30).map((item, index) => {
+            const name = String(title(item) || "Sans nom");
+            const position = getPosition(item);
+            return (
+              <div className="gta-data-row" key={String(item.name || item.Name || name) + "-" + index}>
+                <div className="gta-data-item">
+                  <strong title={name}>{name}</strong>
+                  <small>
+                    {["objects", "vehicles", "peds", "weapons"].includes(kind)
+                      ? item.hash ? "Hash " + item.hash : "Nom d'archétype GTA"
+                      : position ? position.x + ", " + position.y : item.DlcName || item.dlc || "Emplacement non défini"}
+                  </small>
+                </div>
+                {kind === "objects"
+                  ? <button type="button" className="gta-data-action" onClick={() => onAddAsset(name)}>Ajouter</button>
+                  : position
+                    ? <button type="button" className="gta-data-action" onClick={() => onGoTo(position.x, position.y)}>Voir</button>
+                    : ["vehicles", "peds", "weapons"].includes(kind)
+                      ? <span className="gta-data-empty">Catalogue</span>
+                      : <span className="gta-data-empty">—</span>}
+              </div>
+            );
+          })}
+          {!loading && items.length === 0 && <div className="gta-data-empty-state">Aucun élément trouvé.</div>}
+        </div>
+      )}
+      <p className="setting-note">
+        Les dumps donnent les noms, coordonnées et métadonnées. Les modèles 3D originaux restent dans les fichiers de ton installation GTA.
+      </p>
+    </Section>
+  );
+}
+
 function WorldPanel({
-  settings, update,
+  settings, update, mapMode, setMapMode, mapStyle, setMapStyle,
+  assets, onAddAsset, onRemoveAsset, onUpdateAsset,
 }: {
   settings: IslandSettings;
   update: <K extends keyof IslandSettings>(key: K, value: IslandSettings[K]) => void;
+  mapMode: GtaMapMode;
+  setMapMode: (value: GtaMapMode) => void;
+  mapStyle: GtaMapStyle;
+  setMapStyle: (value: GtaMapStyle) => void;
+  assets: GtaPlacedAsset[];
+  onAddAsset: (name: string) => void;
+  onRemoveAsset: (id: string) => void;
+  onUpdateAsset: (id: string, patch: Partial<GtaPlacedAsset>) => void;
 }) {
   const verdict = getPlacementVerdict(settings.originX, settings.originY, settings.worldSize, settings.ignoreGtaMap);
   const [location, setLocation] = useState("");
+  const onGoTo = (x: number, y: number) => {
+    update("originX", x);
+    update("originY", y);
+  };
   return (
     <div className="tab-pane">
-      <div className="tab-head">Monde</div>
-      <div className="tab-sub">Positionner la carte dans les coordonnées de GTA V</div>
+      <div className="tab-head">Monde GTA V</div>
+      <div className="tab-sub">Carte réelle, coordonnées, zones et objets du jeu</div>
+      <Section title="Aperçu du monde">
+        <div className="gta-map-mode">
+          <button type="button" className={mapMode === "2d" ? "is-active" : ""} onClick={() => setMapMode("2d")}>Carte 2D</button>
+          <button type="button" className={mapMode === "3d" ? "is-active" : ""} onClick={() => setMapMode("3d")}>Vue 3D</button>
+        </div>
+        <label className="select-field"><span>Style de carte</span>
+          <select value={mapStyle} onChange={(event) => setMapStyle(event.target.value as GtaMapStyle)}>
+            <option value="satelite">Satellite</option>
+            <option value="atlas">Atlas / routes</option>
+            <option value="grid">Grille de coordonnées</option>
+          </select>
+        </label>
+        <p className="setting-note">La carte principale est à droite. Clique dessus en 2D pour déplacer le centre de ton île ; en 3D, utilise la souris pour orbiter et zoomer.</p>
+      </Section>
       <Section title="Position dans GTA">
-        <GtaPlacementMap x={settings.originX} y={settings.originY} size={settings.worldSize} ignoreGtaMap={settings.ignoreGtaMap} onMove={(x, y) => { update("originX", x); update("originY", y); }} />
-        <div className="map-legend"><span><i className="legend-ocean" /> Océan</span><span><i className="legend-land" /> Carte GTA</span><span><i className="legend-island" /> Votre île</span></div>
         <div className="two-field-grid origin-fields">
           <NumberField label="X" value={settings.originX} step={10} onChange={(v) => update("originX", Math.round(v / 10) * 10)} />
           <NumberField label="Y" value={settings.originY} step={10} onChange={(v) => update("originY", Math.round(v / 10) * 10)} />
@@ -234,16 +385,36 @@ function WorldPanel({
         <label className="select-field"><span>Aller vers…</span><select value={location} onChange={(event) => {
           setLocation(event.target.value);
           const item = GTA_LOCATION_PRESETS[Number(event.target.value)];
-          if (item) { update("originX", item.x); update("originY", item.y); }
+          if (item) onGoTo(item.x, item.y);
         }}><option value="">Choisir une zone</option>{GTA_LOCATION_PRESETS.map((item, index) => <option key={item.label} value={index}>{item.label}</option>)}</select></label>
-        <button className="btn btn-wide" type="button" onClick={() => { update("originX", -12000); update("originY", 0); }}> <MapPin size={13} /> Placer au large à l'ouest</button>
+        <button className="btn btn-wide" type="button" onClick={() => onGoTo(-12000, 0)}><MapPin size={13} /> Placer au large à l'ouest</button>
         <CheckLine label="Map GTA supprimée sur mon serveur" checked={settings.ignoreGtaMap} onChange={(value) => update("ignoreGtaMap", value)} />
         <div className={"place-status is-" + verdict.level}>
           <div className="place-status-title">{verdict.level === "ok" ? <Check size={13} /> : <AlertTriangle size={13} />}{verdict.label}</div>
           {verdict.issues.map((issue) => <p key={issue}>{issue}</p>)}
         </div>
-        <p className="setting-note">La vue de placement est une estimation basée sur des repères connus. Charge les données exactes de ton monde dans CodeWalker pour valider les chevauchements avant déploiement.</p>
       </Section>
+      <GtaDataBrowser onAddAsset={onAddAsset} onGoTo={onGoTo} />
+      {assets.length > 0 && <Section title={"Props ajoutés · " + assets.length}>
+        <div className="gta-placed-list">
+          {assets.map((asset) => (
+            <div className="gta-placed-row" key={asset.id}>
+              <div className="gta-placed-head">
+                <strong title={asset.name}>{asset.name}</strong>
+                <button type="button" className="gta-data-action danger" onClick={() => onRemoveAsset(asset.id)}>Retirer</button>
+              </div>
+              <div className="gta-placed-fields">
+                <label>X<input type="number" step="1" value={Math.round(asset.x)} onChange={(event) => onUpdateAsset(asset.id, { x: Number(event.target.value) || 0 })} /></label>
+                <label>Y<input type="number" step="1" value={Math.round(asset.y)} onChange={(event) => onUpdateAsset(asset.id, { y: Number(event.target.value) || 0 })} /></label>
+                <label>Cap °<input type="number" step="5" value={Math.round(asset.heading)} onChange={(event) => onUpdateAsset(asset.id, { heading: Number(event.target.value) || 0 })} /></label>
+                <label>Z<input type="number" step="0.1" value={Number(asset.z.toFixed(1))} onChange={(event) => onUpdateAsset(asset.id, { z: Number(event.target.value) || 0 })} /></label>
+                <label>Échelle<input type="number" min="0.05" max="50" step="0.05" value={asset.scale} onChange={(event) => onUpdateAsset(asset.id, { scale: Math.max(0.05, Math.min(50, Number(event.target.value) || 1)) })} /></label>
+              </div>
+              <small className="gta-placed-coords">Coordonnées monde GTA · Z {asset.z.toFixed(1)} m</small>
+            </div>
+          ))}
+        </div>
+      </Section>}
     </div>
   );
 }
@@ -311,6 +482,10 @@ export default function IslandStudio() {
   const [settings, setSettings] = useState<IslandSettings>({ ...DEFAULT_SETTINGS });
   const [generatedSettings, setGeneratedSettings] = useState<IslandSettings>({ ...DEFAULT_SETTINGS });
   const [terrain, setTerrain] = useState<TerrainData | null>(null);
+  const [worldMapMode, setWorldMapMode] = useState<GtaMapMode>("2d");
+  const [worldMapStyle, setWorldMapStyle] = useState<GtaMapStyle>("satelite");
+  const [placedAssets, setPlacedAssets] = useState<GtaPlacedAsset[]>([]);
+
   const [activeTab, setActiveTab] = useState<"terrain" | "surface" | "world" | "export">("terrain");
   const [activeTool, setActiveTool] = useState<BrushTool>("orbit");
   const [brushRadius, setBrushRadius] = useState(14);
@@ -353,6 +528,60 @@ export default function IslandStudio() {
       return { ...current, [key]: value };
     });
   }, []);
+
+  const moveWorldOrigin = useCallback((x: number, y: number) => {
+    setSettings((current) => ({ ...current, originX: x, originY: y }));
+  }, []);
+
+  const samplePlacedHeight = useCallback((worldX: number, worldY: number) => {
+    if (!terrain) return 0;
+    const localX = worldX - settings.originX;
+    const localY = worldY - settings.originY;
+    const gx = (localX + terrain.half) / terrain.cell;
+    const gy = (localY + terrain.half) / terrain.cell;
+    if (gx < 0 || gy < 0 || gx > terrain.n - 1 || gy > terrain.n - 1) return 0;
+    const ix = Math.min(terrain.n - 2, Math.max(0, Math.floor(gx)));
+    const iy = Math.min(terrain.n - 2, Math.max(0, Math.floor(gy)));
+    const fx = Math.max(0, Math.min(1, gx - ix));
+    const fy = Math.max(0, Math.min(1, gy - iy));
+    const a = terrain.heights[iy * terrain.n + ix];
+    const b = terrain.heights[iy * terrain.n + ix + 1];
+    const c = terrain.heights[(iy + 1) * terrain.n + ix];
+    const d = terrain.heights[(iy + 1) * terrain.n + ix + 1];
+    const north = a * (1 - fx) + b * fx;
+    const south = c * (1 - fx) + d * fx;
+    return north * (1 - fy) + south * fy;
+  }, [terrain, settings.originX, settings.originY]);
+
+  const addPlacedAsset = useCallback((name: string) => {
+    const x = settings.originX;
+    const y = settings.originY;
+    setPlacedAssets((current) => [...current, {
+      id: crypto.randomUUID(),
+      name,
+      x,
+      y,
+      z: samplePlacedHeight(x, y) + 0.15,
+      heading: 0,
+      scale: 1,
+    }]);
+    setNotice("Prop GTA ajouté à la liste de placement");
+  }, [settings.originX, settings.originY, samplePlacedHeight]);
+
+  const removePlacedAsset = useCallback((id: string) => {
+    setPlacedAssets((current) => current.filter((asset) => asset.id !== id));
+  }, []);
+
+  const updatePlacedAsset = useCallback((id: string, patch: Partial<GtaPlacedAsset>) => {
+    setPlacedAssets((current) => current.map((asset) => {
+      if (asset.id !== id) return asset;
+      const updated = { ...asset, ...patch };
+      if (patch.x !== undefined || patch.y !== undefined) {
+        updated.z = samplePlacedHeight(updated.x, updated.y) + 0.15;
+      }
+      return updated;
+    }));
+  }, [samplePlacedHeight]);
 
   const generate = useCallback(async (override?: IslandSettings) => {
     const nextSettings = { ...(override ?? settings) };
@@ -507,6 +736,7 @@ export default function IslandStudio() {
         body: JSON.stringify({
           params: generatedSettings,
           gen: gameGen,
+          placedAssets: placedAssets.map(({ name, x, y, z, heading, scale }) => ({ name, x, y, z, heading, scale })),
           edits: await encodeTerrainEdits(terrain),
           options: {
             xml,
@@ -673,119 +903,132 @@ export default function IslandStudio() {
         <aside className="panel">
           {activeTab === "terrain" && <TerrainPanel settings={settings} update={update} generate={() => void generate()} dirty={dirty} busy={busy} />}
           {activeTab === "surface" && <SurfacePanel settings={settings} update={update} layers={layers} setLayer={setLayer} />}
-          {activeTab === "world" && <WorldPanel settings={settings} update={update} />}
+          {activeTab === "world" && <WorldPanel settings={settings} update={update} mapMode={worldMapMode} setMapMode={setWorldMapMode} mapStyle={worldMapStyle} setMapStyle={setWorldMapStyle} assets={placedAssets} onAddAsset={addPlacedAsset} onRemoveAsset={removePlacedAsset} onUpdateAsset={updatePlacedAsset} />}
           {activeTab === "export" && <ExportPanel data={terrain} settings={generatedSettings} setWaves={(value) => { setSettings((current) => ({ ...current, waves: value })); setGeneratedSettings((current) => ({ ...current, waves: value })); }} dirty={dirty} gameGen={gameGen} setGameGen={setGameGen} xml={xml} setXml={setXml} sourceExport={() => void sourceExport()} nativeExport={() => void nativeExport()} exporting={exporting} exportProgress={exportProgress} exportStatus={exportStatus} />}
         </aside>
 
         <main className="viewport" id="viewport">
-          {!terrain ? (
-            <div className="viewport-loading"><Loader2 size={24} className="spin" /><span>Initialisation du générateur…</span></div>
+          {activeTab === "world" ? (
+            <GtaWorldView
+              x={settings.originX}
+              y={settings.originY}
+              size={settings.worldSize}
+              mode={worldMapMode}
+              style={worldMapStyle}
+              terrain={terrain}
+              assets={placedAssets}
+              onMove={moveWorldOrigin}
+            />
           ) : (
             <>
-              <div className="hud hud-left" id="hud-display">
-                <div className="hud-title">Affichage <ChevronDown size={13} /></div>
-                <div className="hud-body">
-                  <div className="view-modes">
-                    {(["render", "height", "material", "wireframe"] as ViewMode[]).map((mode) => <button key={mode} className={viewMode === mode ? "view-mode is-active" : "view-mode"} onClick={() => setViewMode(mode)}>{mode === "render" ? "Rendu" : mode === "height" ? "Altitude" : mode === "material" ? "Couches" : "Wireframe"}</button>)}
-                  </div>
-                  <div className="hud-sep" />
-                  <div className="hud-toggle-grid">
-                    <CheckLine label="Herbe" checked={layers.grass} onChange={(v) => setLayer("grass", v)} />
-                    <CheckLine label="Arbres & rochers" checked={layers.props} onChange={(v) => setLayer("props", v)} />
-                    <CheckLine label="Eau" checked={layers.water} onChange={(v) => setLayer("water", v)} />
-                    <CheckLine label="Grille (G)" checked={layers.grid} onChange={(v) => setLayer("grid", v)} />
-                    <CheckLine label="Chunks" checked={layers.chunks} onChange={(v) => setLayer("chunks", v)} />
-                    <CheckLine label="Repères" checked={layers.context} onChange={(v) => setLayer("context", v)} />
-                  </div>
-                  <div className="hud-row"><span><Sun size={12} /> Heure</span><input type="range" min="5" max="21" step="0.1" value={hour} onChange={(event) => setHour(Number(event.target.value))} /><strong>{hour.toFixed(1)} h</strong></div>
-                </div>
-              </div>
-
-              <div className="hud-right-stack">
-                <div className="view-cube-host">
-                  <div className="cube-stage">
-                    <button className="cube-top" onClick={() => canvasRef.current?.setTopView(true)}>DESSUS</button>
-                    <div className="cube-faces">
-                      <button onClick={() => canvasRef.current?.setTopView(false)}>3D</button>
-                      <button onClick={() => canvasRef.current?.frameIsland()}>REC</button>
+              {!terrain ? (
+                <div className="viewport-loading"><Loader2 size={24} className="spin" /><span>Initialisation du générateur…</span></div>
+              ) : (
+                <>
+                  <div className="hud hud-left" id="hud-display">
+                    <div className="hud-title">Affichage <ChevronDown size={13} /></div>
+                    <div className="hud-body">
+                      <div className="view-modes">
+                        {(["render", "height", "material", "wireframe"] as ViewMode[]).map((mode) => <button key={mode} className={viewMode === mode ? "view-mode is-active" : "view-mode"} onClick={() => setViewMode(mode)}>{mode === "render" ? "Rendu" : mode === "height" ? "Altitude" : mode === "material" ? "Couches" : "Wireframe"}</button>)}
+                      </div>
+                      <div className="hud-sep" />
+                      <div className="hud-toggle-grid">
+                        <CheckLine label="Herbe" checked={layers.grass} onChange={(v) => setLayer("grass", v)} />
+                        <CheckLine label="Arbres & rochers" checked={layers.props} onChange={(v) => setLayer("props", v)} />
+                        <CheckLine label="Eau" checked={layers.water} onChange={(v) => setLayer("water", v)} />
+                        <CheckLine label="Grille (G)" checked={layers.grid} onChange={(v) => setLayer("grid", v)} />
+                        <CheckLine label="Chunks" checked={layers.chunks} onChange={(v) => setLayer("chunks", v)} />
+                        <CheckLine label="Repères" checked={layers.context} onChange={(v) => setLayer("context", v)} />
+                      </div>
+                      <div className="hud-row"><span><Sun size={12} /> Heure</span><input type="range" min="5" max="21" step="0.1" value={hour} onChange={(event) => setHour(Number(event.target.value))} /><strong>{hour.toFixed(1)} h</strong></div>
                     </div>
                   </div>
-                </div>
-                <div className="hud hud-stats">
-                  <div className="hud-title">Carte</div>
-                  <dl className="stats">
-                    <dt>Taille</dt><dd>{formatWorldSize(generatedSettings.worldSize)}</dd>
-                    <dt>Terre</dt><dd>{stats?.land.toFixed(1)} km²</dd>
-                    <dt>Altitude</dt><dd>{stats?.height.toFixed(0)} m</dd>
-                    <dt>Chunks</dt><dd>{stats?.chunks}</dd>
-                  </dl>
-                  <div className="hud-placement"><span>Seed <b>{generatedSettings.seed}</b></span><span>Centre <b>{generatedSettings.originX}, {generatedSettings.originY}</b></span><PlacementStatus settings={generatedSettings} /></div>
-                </div>
-              </div>
 
-              <div className="toolbar">
-                <div className="tb-tools">
-                  {[
-                    ["orbit", "Caméra", "1"], ["raise", "Élever", "2"], ["lower", "Creuser", "3"],
-                    ["smooth", "Lisser", "4"], ["flatten", "Aplanir", "5"], ["paint", "Peindre", "6"],
-                    ["erase", "Gomme", "7"], ["vegRemove", "Déboiser", "8"], ["vegAdd", "Densifier", "9"],
-                  ].map(([id, label, key]) => <button type="button" key={id} className={activeTool === id ? "tb-tool is-active" : "tb-tool"} title={label + " (" + key + ")"} onClick={() => { setPlayMode(false); setActiveTool(id as BrushTool); }}><i className={"tb-dot tool-" + id} /><span>{label}</span><kbd>{key}</kbd></button>)}
-                </div>
-                <div className="tb-controls">
-                  {activeTool === "paint" && <div className="tb-layers">{MATERIAL_OPTIONS.map((layer, index) => <button key={layer.id} className={activeLayer === index ? "tb-swatch is-active" : "tb-swatch"} title={layer.label} style={{ background: layer.color }} onClick={() => setActiveLayer(index)} />)}</div>}
-                  <label className="tb-slider"><span>Rayon</span><input type="range" min="2" max={Math.min(120, Math.max(10, Math.round(generatedSettings.worldSize / 14)))} value={brushRadius} onChange={(event) => setBrushRadius(Number(event.target.value))} /><b>{brushRadius} m</b></label>
-                  <label className="tb-slider"><span>Force</span><input type="range" min="0.05" max="1" step="0.05" value={brushStrength} onChange={(event) => setBrushStrength(Number(event.target.value))} /><b>{Math.round(brushStrength * 100)}%</b></label>
-                  <div className="tb-actions">
-                    <button className="tb-btn" disabled={!history.canUndo} onClick={() => canvasRef.current?.undo()} title="Annuler (Ctrl+Z)"><Undo2 size={15} /></button>
-                    <button className="tb-btn" disabled={!history.canRedo} onClick={() => canvasRef.current?.redo()} title="Rétablir (Ctrl+Y)"><Redo2 size={15} /></button>
-                    <button className="tb-btn tb-text" onClick={() => canvasRef.current?.clearEdits()} title="Effacer toutes les retouches"><RotateCcw size={13} /> Effacer</button>
-                    {history.canUndo && <span className="tb-badge">Retouches en cours</span>}
+                  <div className="hud-right-stack">
+                    <div className="view-cube-host">
+                      <div className="cube-stage">
+                        <button className="cube-top" onClick={() => canvasRef.current?.setTopView(true)}>DESSUS</button>
+                        <div className="cube-faces">
+                          <button onClick={() => canvasRef.current?.setTopView(false)}>3D</button>
+                          <button onClick={() => canvasRef.current?.frameIsland()}>REC</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="hud hud-stats">
+                      <div className="hud-title">Carte</div>
+                      <dl className="stats">
+                        <dt>Taille</dt><dd>{formatWorldSize(generatedSettings.worldSize)}</dd>
+                        <dt>Terre</dt><dd>{stats?.land.toFixed(1)} km²</dd>
+                        <dt>Altitude</dt><dd>{stats?.height.toFixed(0)} m</dd>
+                        <dt>Chunks</dt><dd>{stats?.chunks}</dd>
+                      </dl>
+                      <div className="hud-placement"><span>Seed <b>{generatedSettings.seed}</b></span><span>Centre <b>{generatedSettings.originX}, {generatedSettings.originY}</b></span><PlacementStatus settings={generatedSettings} /></div>
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              <div className="viewport-canvas">
-                <IslandCanvas
-                  ref={canvasRef}
-                  data={terrain}
-                  settings={generatedSettings}
-                  activeTool={activeTool}
-                  brushRadius={brushRadius}
-                  brushStrength={brushStrength}
-                  activeLayer={activeLayer}
-                  viewMode={viewMode}
-                  layers={layers}
-                  hour={hour}
-                  playMode={playMode}
-                  onPlayModeChange={setPlayMode}
-                  onPlayerStatus={setPlayerStatus}
-                  onHistoryChange={setHistory}
-                  onEditChanged={() => setNotice("Retouche de terrain modifiée")}
-                  onClearEdits={() => void generate(generatedSettings)}
-                />
-              </div>
+                  <div className="toolbar">
+                    <div className="tb-tools">
+                      {[
+                        ["orbit", "Caméra", "1"], ["raise", "Élever", "2"], ["lower", "Creuser", "3"],
+                        ["smooth", "Lisser", "4"], ["flatten", "Aplanir", "5"], ["paint", "Peindre", "6"],
+                        ["erase", "Gomme", "7"], ["vegRemove", "Déboiser", "8"], ["vegAdd", "Densifier", "9"],
+                      ].map(([id, label, key]) => <button type="button" key={id} className={activeTool === id ? "tb-tool is-active" : "tb-tool"} title={label + " (" + key + ")"} onClick={() => { setPlayMode(false); setActiveTool(id as BrushTool); }}><i className={"tb-dot tool-" + id} /><span>{label}</span><kbd>{key}</kbd></button>)}
+                    </div>
+                    <div className="tb-controls">
+                      {activeTool === "paint" && <div className="tb-layers">{MATERIAL_OPTIONS.map((layer, index) => <button key={layer.id} className={activeLayer === index ? "tb-swatch is-active" : "tb-swatch"} title={layer.label} style={{ background: layer.color }} onClick={() => setActiveLayer(index)} />)}</div>}
+                      <label className="tb-slider"><span>Rayon</span><input type="range" min="2" max={Math.min(120, Math.max(10, Math.round(generatedSettings.worldSize / 14)))} value={brushRadius} onChange={(event) => setBrushRadius(Number(event.target.value))} /><b>{brushRadius} m</b></label>
+                      <label className="tb-slider"><span>Force</span><input type="range" min="0.05" max="1" step="0.05" value={brushStrength} onChange={(event) => setBrushStrength(Number(event.target.value))} /><b>{Math.round(brushStrength * 100)}%</b></label>
+                      <div className="tb-actions">
+                        <button className="tb-btn" disabled={!history.canUndo} onClick={() => canvasRef.current?.undo()} title="Annuler (Ctrl+Z)"><Undo2 size={15} /></button>
+                        <button className="tb-btn" disabled={!history.canRedo} onClick={() => canvasRef.current?.redo()} title="Rétablir (Ctrl+Y)"><Redo2 size={15} /></button>
+                        <button className="tb-btn tb-text" onClick={() => canvasRef.current?.clearEdits()} title="Effacer toutes les retouches"><RotateCcw size={13} /> Effacer</button>
+                        {history.canUndo && <span className="tb-badge">Retouches en cours</span>}
+                      </div>
+                    </div>
+                  </div>
 
-              <div className="scale-bar">
-                <span>{generatedSettings.originX}, {generatedSettings.originY}</span>
-                <div className="scale-line"><i /></div><strong>{formatWorldSize(Math.max(100, Math.round(generatedSettings.worldSize / 5 / 100) * 100))}</strong>
-              </div>
+                  <div className="viewport-canvas">
+                    <IslandCanvas
+                      ref={canvasRef}
+                      data={terrain}
+                      settings={generatedSettings}
+                      activeTool={activeTool}
+                      brushRadius={brushRadius}
+                      brushStrength={brushStrength}
+                      activeLayer={activeLayer}
+                      viewMode={viewMode}
+                      layers={layers}
+                      hour={hour}
+                      playMode={playMode}
+                      onPlayModeChange={setPlayMode}
+                      onPlayerStatus={setPlayerStatus}
+                      onHistoryChange={setHistory}
+                      onEditChanged={() => setNotice("Retouche de terrain modifiée")}
+                      onClearEdits={() => void generate(generatedSettings)}
+                    />
+                  </div>
 
-              <div className="viewer-overlay" id="keys-overlay">
-                <span><kbd>1–9</kbd> outils</span><span><kbd>[ ]</kbd> rayon</span><span><kbd>Ctrl+Z</kbd> annuler</span><span><kbd>T</kbd> dessus</span><span><kbd>G</kbd> grille</span><span><kbd>P</kbd> jouer</span><span><kbd>R</kbd> seed</span><span><kbd>V</kbd> variantes</span>
-              </div>
+                  <div className="scale-bar">
+                    <span>{generatedSettings.originX}, {generatedSettings.originY}</span>
+                    <div className="scale-line"><i /></div><strong>{formatWorldSize(Math.max(100, Math.round(generatedSettings.worldSize / 5 / 100) * 100))}</strong>
+                  </div>
 
-              {playMode && <div className="play-hud">
-                <div className="crosshair">+</div>
-                <div className="play-keys"><span><kbd>ZQSD</kbd> bouger</span><span><kbd>Maj</kbd> sprint</span><span><kbd>Alt</kbd> marcher</span><span><kbd>Espace</kbd> sauter</span><span><kbd>C</kbd> 1re / 3e pers.</span><span><kbd>Échap</kbd> quitter</span></div>
-                {playerStatus && <div className="play-coordinate"><b>{Math.round(playerStatus.x)}, {Math.round(playerStatus.y)}</b> · {playerStatus.swimming ? "nage" : "alt. " + playerStatus.z.toFixed(1) + " m"} · {Math.round(playerStatus.speed * 3.6)} km/h</div>}
-              </div>}
+                  <div className="viewer-overlay" id="keys-overlay">
+                    <span><kbd>1–9</kbd> outils</span><span><kbd>[ ]</kbd> rayon</span><span><kbd>Ctrl+Z</kbd> annuler</span><span><kbd>T</kbd> dessus</span><span><kbd>G</kbd> grille</span><span><kbd>P</kbd> jouer</span><span><kbd>R</kbd> seed</span><span><kbd>V</kbd> variantes</span>
+                  </div>
+
+                  {playMode && <div className="play-hud">
+                    <div className="crosshair">+</div>
+                    <div className="play-keys"><span><kbd>ZQSD</kbd> bouger</span><span><kbd>Maj</kbd> sprint</span><span><kbd>Alt</kbd> marcher</span><span><kbd>Espace</kbd> sauter</span><span><kbd>C</kbd> 1re / 3e pers.</span><span><kbd>Échap</kbd> quitter</span></div>
+                    {playerStatus && <div className="play-coordinate"><b>{Math.round(playerStatus.x)}, {Math.round(playerStatus.y)}</b> · {playerStatus.swimming ? "nage" : "alt. " + playerStatus.z.toFixed(1) + " m"} · {Math.round(playerStatus.speed * 3.6)} km/h</div>}
+                  </div>}
+                </>
+              )}
+              {busy && <div className="busy"><span>{busyLabel}</span><div className="busy-bar"><span style={{ width: progress + "%" }} /></div></div>}
             </>
           )}
-
-          {busy && <div className="busy"><span>{busyLabel}</span><div className="busy-bar"><span style={{ width: progress + "%" }} /></div></div>}
         </main>
       </div>
-
       <footer className="statusbar">
         <span className="status-indicator" />
         <span>{notice}</span>

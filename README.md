@@ -50,49 +50,57 @@ The ZIP now contains:
 
 The source ZIP is **not a finished FiveM map**. OBJ, GLB, RAW and fallback PNGs are not native GTA V RAGE assets.
 
-### Native FiveM package (worker local + PyMateria)
+### Carte du monde GTA V
 
-Le worker Windows est intégré au démarrage de l'application. Il reçoit les exports depuis Next.js, lance Blender en tâche de fond et utilise Sollumz/szio + PyMateria pour générer les ressources GTA natives :
+L'onglet **Monde** utilise deux sources distinctes :
 
-- **YDR** terrain visible, découpé en tuiles.
-- **YBN** collisions BVH.
-- **YTYP** archetypes.
-- **YTD** dictionnaires de textures.
-- **YMAP** natif RSC7, avec les placements et la hiérarchie HD/LOD/SLOD.
-- Sources CodeWalker XML facultatives, rapports et manifests.
+- **Carte 2D** : les tuiles satellite, atlas routier et grille de [VIRUXE/gtav-map-tiles](https://github.com/VIRUXE/gtav-map-tiles), affichées dans Leaflet. Le clic repositionne le centre de l'île et son emprise.
+- **Vue 3D** : la carte GTA est le fond cartographique en perspective ; l'île générée par Island Forge est un vrai maillage 3D positionné en coordonnées GTA. Les props placés sont marqués sur les deux vues.
 
-Le worker relit chaque YMAP avec szio et refuse de marquer l'export prêt si le fichier est illisible ou vide. CodeWalker reste disponible pour inspecter la carte, mais n'est pas requis pour convertir le YMAP.
+La vue 3D ne reconstruit pas encore le relief natif de Los Santos et Blaine County : elle affiche les tuiles cartographiques en fond et le terrain créé en 3D au-dessus. Le dépôt de tuiles est non officiel ; la carte et les éléments graphiques GTA restent la propriété de Rockstar Games.
 
-### Démarrage automatique — aucun fichier .env
+### Données et props GTA
 
-Sur Windows 10/11 :
+Island Forge charge les métadonnées depuis [DurtyFree/gta-v-data-dumps](https://github.com/DurtyFree/gta-v-data-dumps) via une API Next.js mise en cache :
 
-1. Installe Node.js 20+, Blender 4.5+, Sollumz et PyMateria dans ton profil Blender.
-2. Dans le dossier du projet, lance simplement :
+- **Props** : recherche dans la liste des noms d'objets créables, puis ajout au placement.
+- **Véhicules, peds et armes** : catalogues de noms et hashes issus des listes INI DurtyFree, disponibles pour consultation.
+- **Zones** : noms et limites du monde.
+- **IPL** : noms, catégories et coordonnées disponibles.
+- **Intérieurs/MLO** : noms et emplacements publiés par le dump.
+
+Les dumps fournissent des noms, hashes éventuels et coordonnées, pas les maillages 3D ni les textures du jeu. Un prop ajouté est référencé par son nom d'archétype dans le YMAP ; le modèle visible en jeu vient de GTA/FiveM. Dans l'aperçu web, les props ajoutés sont des marqueurs, pas les modèles GTA originaux.
+
+### Export natif FiveM — sans Blender
+
+Le worker local utilise **Island Forge Native Engine**, un exécutable C++20 basé sur [RatPrez/ragekit](https://github.com/RatPrez/ragekit) (licence MIT). Il écrit directement les ressources GTA RAGE :
+
+- **YDR** : terrain découpé en tuiles avec plusieurs niveaux de détail.
+- **YBN** : collisions BVH par tuile.
+- **YTD** : textures de terrain de secours générées depuis les couches sélectionnées.
+- **YTYP** : archétypes des tuiles.
+- **YMAP** : placements de terrain, props, arbres, rochers et données d'herbe en ressource RSC7 native.
+
+Le moteur relit les ressources produites avec Ragekit et vérifie l'en-tête RSC7 du YMAP avant de marquer le travail terminé. CodeWalker reste utile pour inspecter le résultat, mais n'est pas une dépendance de conversion. **Aucun Blender, Sollumz ou fichier .env n'est requis.**
+
+#### Démarrer sur Windows 10/11 x64
 
 ~~~powershell
 npm install
 npm run dev
 ~~~
 
-3. Ouvre http://localhost:3000.
+Puis ouvre http://localhost:3000. Au premier lancement, scripts/run-local.mjs télécharge automatiquement le moteur Windows publié dans la release native-engine-v0.1.0, le place dans .islandforge/bin/ et lance Next.js et le worker dans le même terminal. Les lancements suivants réutilisent le binaire local. Après une compilation, npm start démarre également les deux services.
 
-npm run dev lance automatiquement Next.js **et** le worker local. Il cherche Blender dans les emplacements Windows habituels ou dans le PATH, puis détecte Sollumz dans les profils Blender installés. Le worker écoute uniquement sur 127.0.0.1, sans fichier .env, sans token à saisir et sans second terminal.
+Le workflow GitHub Actions compile le moteur sur Linux et Windows. Après fusion du code dans main, le workflow de release publie l'exécutable Windows utilisé par le lanceur. Le dépôt ne versionne pas le binaire dans Git.
 
-Après une compilation, npm start lance aussi les deux services. Pour démarrer uniquement le worker, utilise npm run worker ou native-worker/start-worker.ps1.
+Sur Linux/macOS, l'éditeur et l'export source restent utilisables ; l'exécutable natif fourni par le projet est actuellement destiné à Windows x64. Aucun outil 3D externe n'est à installer sur Windows.
 
-**À savoir :** si Blender ou Sollumz n'est pas installé, l'éditeur 3D, la génération et l'export source OBJ/GLB restent disponibles. L'export RAGE natif affichera une erreur explicite au lieu de prétendre avoir créé une ressource FiveM.
+#### Textures et limites natives
 
-### Textures GunWare
+Les fichiers de référence GunWare fournis contenaient les noms des dictionnaires de textures GTA, pas les bitmaps originaux. Le moteur génère donc des textures procédurales de secours pour le YTD ; il ne prétend pas réutiliser les textures originales GunWare.
 
-Les sources GunWare fournies contenaient les noms des dictionnaires de textures GTA, pas les bitmaps diffuse/normal originaux. Island Forge utilise donc des textures de secours procédurales si aucun bitmap de remplacement n'est présent. Tu peux déposer tes images de remplacement dans le dossier de textures local du worker ; elles ne sont jamais présentées comme les textures originales.
-
-### Limites restantes
-
-- Les water quads GTA natifs ne sont pas encore produits ; leurs paramètres sont exportés en métadonnées.
-- Les placements d'herbe sont conservés, mais les YMAP grass instance lists natives restent à implémenter.
-- Les arbres et rochers référencent des archétypes GTA existants, à vérifier sur le build cible.
-- Une inspection CodeWalker et un test sur un serveur FiveM propre restent recommandés avant déploiement.
+Les arbres, rochers et props de la liste DurtyFree sont référencés par hash/nom d'archétype. Leur disponibilité dépend du build GTA utilisé. L'export de l'eau GTA native et la validation visuelle complète des ressources sur un serveur FiveM restent à finaliser. La compilation CI valide le moteur, mais ne remplace pas un test en jeu sur une installation GTA/FiveM cible.
 
 
 ## Validation et démarrage en production
@@ -109,7 +117,7 @@ npm start démarre Next.js et le worker local ensemble, comme npm run dev.
 
 ## Deploy
 
-For local development and local production startup, use the included runner (npm run dev / npm start) so the worker starts alongside Next.js. On a separate remote deployment, keep the worker on a private network and override the bridge URL/token through the deployment environment; this is optional and not needed for local use.
+Pour le développement et l'utilisation locale, npm run dev ou npm start lance Next.js et le worker local. Le moteur natif Windows est téléchargé automatiquement ; aucun fichier .env n'est nécessaire.
 
 ## Coordinate notes
 

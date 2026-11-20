@@ -1,15 +1,13 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, stat, writeFile, copyFile } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { gunzipSync } from "node:zlib";
-import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(process.env.ISLAND_WORKER_DATA || "./island-worker-data");
-const SCRIPT = fileURLToPath(new URL("./blender/export_island.py", import.meta.url));
-const BLENDER = process.env.BLENDER_PATH || "";
+const NATIVE_ENGINE = resolve(process.env.ISLAND_NATIVE_ENGINE || "./.islandforge/bin/island-forge-native-engine.exe");
 const TOKEN = process.env.ISLAND_EXPORT_BRIDGE_TOKEN || "islandforge-local-development-only";
 const HOST = process.env.ISLAND_WORKER_HOST || "127.0.0.1";
 const PORT = Number(process.env.ISLAND_EXPORT_BRIDGE_PORT || 8787);
@@ -114,6 +112,7 @@ async function writeJobPayload(id, payload) {
     materials: payload.materials || [],
     options: payload.options || {},
     counts: validated.counts,
+    placedAssets: Array.isArray(payload.placedAssets) ? payload.placedAssets.slice(0, 10000) : [],
     binaryFile: "terrain.f32",
   };
   await writeFile(join(dir, "job.json"), JSON.stringify(meta, null, 2));
@@ -174,26 +173,25 @@ function runProcess(executable, args, cwd, onProgress) {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) resolvePromise({ stdout, stderr });
-      else reject(new Error("Blender a quitté avec le code " + code + ".\n" + stderr.slice(-8000)));
+      else reject(new Error("Le moteur d’export natif a quitté avec le code " + code + ".\n" + stderr.slice(-8000)));
     });
   });
 }
 
 async function processJob(job) {
-  if (!BLENDER) throw new Error("Blender est introuvable. Installe Blender 4.5+, vérifie qu'il est dans le PATH, puis relance npm run dev.");
+  if (!existsSync(NATIVE_ENGINE)) {
+    throw new Error("Le moteur natif GTA Island Forge est introuvable. Relance npm run dev avec une connexion Internet pour télécharger le moteur intégré.");
+  }
+
   const artifacts = join(job.dir, "artifacts");
   await mkdir(artifacts, { recursive: true });
-  await updateJob(job, { state: "running", stage: "Préparation des maillages et matériaux", done: 1, total: 7, error: null });
-  const result = await runProcess(BLENDER, [
-    "--background",
-    "--factory-startup",
-    "--python", SCRIPT,
-    "--",
+  await updateJob(job, { state: "running", stage: "Génération des ressources RAGE", done: 1, total: 7, error: null });
+  const result = await runProcess(NATIVE_ENGINE, [
     "--job", join(job.dir, "job.json"),
     "--output", artifacts,
   ], job.dir, (progress) => {
     updateJob(job, {
-      stage: String(progress.stage || "Export Blender/Sollumz"),
+      stage: String(progress.stage || "Export natif RAGE"),
       done: Math.max(1, Math.min(6, Number(progress.done) || 1)),
       total: 7,
       warning: progress.warning || job.warning || null,
@@ -202,7 +200,6 @@ async function processJob(job) {
 
   const files = await collectFiles(artifacts);
   const nativeExts = new Set([".ydr", ".ybn", ".ytyp", ".ytd", ".ymap"]);
-  const cwMapFiles = files.filter((path) => path.toLowerCase().endsWith(".ymap.xml"));
   const nativeFiles = files.filter((path) => nativeExts.has(extname(path).toLowerCase()));
   const nativeMapFiles = files.filter((path) => extname(path).toLowerCase() === ".ymap");
   const count = (ext) => files.filter((path) => extname(path).toLowerCase() === ext).length;
@@ -210,10 +207,7 @@ async function processJob(job) {
   const missingTypes = requiredTypes.filter((ext) => count(ext) < 1);
   if (missingTypes.length) {
     const log = result.stderr.slice(-4000) || result.stdout.slice(-4000);
-    throw new Error(
-      "Le backend natif Sollumz/PyMateria n'a pas produit tous les fichiers GTA attendus. " +
-      "Manquants : " + missingTypes.join(", ") + ". " + log
-    );
+    throw new Error("Le moteur RAGE n'a pas produit tous les fichiers GTA attendus. Manquants : " + missingTypes.join(", ") + ". " + log);
   }
   for (const path of nativeMapFiles) {
     const header = (await readFile(path)).subarray(0, 4).toString("ascii");
@@ -236,12 +230,6 @@ async function processJob(job) {
       const destination = join(streamDir, relativeFile.replace(/[\\/]/g, "_"));
       await mkdir(dirname(destination), { recursive: true });
       await writeFile(destination, await readFile(file));
-    } else if (file.toLowerCase().endsWith(".ymap.xml") || file.toLowerCase().endsWith(".ytyp.xml")) {
-      // Keep the optional CodeWalker XML as an editable source beside the game-ready binaries.
-      const sourceDir = join(packageDir, "sources", "cwxml");
-      await mkdir(sourceDir, { recursive: true });
-      const destination = join(sourceDir, relativeFile.replace(/[\\/]/g, "_"));
-      await writeFile(destination, await readFile(file));
     }
   }
 
@@ -258,28 +246,28 @@ async function processJob(job) {
     "data_file 'DLC_ITYP_REQUEST' 'stream/*.ytyp'",
   ].join("\n") + "\n";
   await writeFile(join(packageDir, "fxmanifest.lua"), manifest);
-  const generation = "gen" + job.generation;
+  const generation = "gen" + job.meta.generation;
   await writeFile(join(packageDir, "config", "native-export.json"), JSON.stringify({
     resource: job.meta.params.name,
     generation,
     nativeAssets: nativeFiles.map((path) => relative(artifacts, path)),
     ymapBinary: nativeMapFiles.map((path) => relative(artifacts, path)),
-    ymapCodeWalkerXml: cwMapFiles.map((path) => relative(artifacts, path)),
-    exportBackend: "Sollumz + szio + PyMateria",
+    exportBackend: "Island Forge Native Engine + ragekit",
     counts: {
       ydr: count(".ydr"), ybn: count(".ybn"), ytyp: count(".ytyp"), ytd: count(".ytd"),
-      ymap: count(".ymap"), ymapXml: cwMapFiles.length,
+      ymap: count(".ymap"),
     },
     nativeReady,
     manualCodeWalkerFinalizeRequired: false,
-    reason: "The native PyMateria provider writes the YMAP RSC resource directly. CodeWalker is optional for inspection/editing.",
+    reason: "Les ressources RAGE sont écrites et relues par le moteur natif. CodeWalker reste facultatif pour inspection.",
   }, null, 2));
+
   await writeFile(join(packageDir, "README_INSTALL.txt"), [
     "ISLAND FORGE — NATIVE FIVEM MAP",
     "",
-    "The worker generated native YDR, YBN, YMAP, YTYP and YTD assets for " + generation + ".",
-    "The YMAP is already a native RSC7 resource and is included in stream/.",
-    "The optional CodeWalker XML source is included under sources/cwxml/ when available.",
+    "Island Forge Native Engine generated native YDR, YBN, YMAP, YTYP and YTD assets for " + generation + ".",
+    "The YMAP is a native RSC7 resource and is included in stream/.",
+    "The assets were written and validated by ragekit. No Blender or CodeWalker conversion is required.",
     "",
     "INSTALLATION:",
     "1. Copy this folder into your FiveM resources directory.",
@@ -287,27 +275,27 @@ async function processJob(job) {
     "3. Check that referenced GTA tree/rock archetypes exist on the target server build.",
     "4. Inspect the map in CodeWalker if desired, then test it on a clean FiveM server.",
     "",
-    "The export report records the native asset counts and known limitations.",
+    "The export report records native asset counts and known limitations.",
   ].join("\n") + "\n");
 
   await writeFile(join(reportDir, "export-report.json"), JSON.stringify({
     generatedAt: new Date().toISOString(),
     generation,
     nativeReady,
-    nativeExportBackend: "Sollumz + szio + PyMateria",
+    nativeExportBackend: "Island Forge Native Engine + ragekit",
     binaryAssets: {
       ydr: count(".ydr"), ybn: count(".ybn"), ytyp: count(".ytyp"), ytd: count(".ytd"),
       ymap: count(".ymap"),
     },
-    ymapCodeWalkerXml: cwMapFiles.length,
-    note: "YMAP is emitted as native RSC7 by PyMateria. CodeWalker XML is included only as an optional source.",
+    note: "YMAP natif RSC7 relu par ragekit. Aucune conversion Blender n'est utilisée.",
   }, null, 2));
 
-  // Preserve the Blender-side diagnostics and source-side manifests in the delivered resource.
-  const blenderReport = join(artifacts, "blender-report.json");
-  if (await stat(blenderReport).then(() => true).catch(() => false)) {
-    await copyFile(blenderReport, join(reportDir, "blender-report.json"));
+  const engineReport = join(artifacts, "native-engine-report.json");
+  if (await stat(engineReport).then(() => true).catch(() => false)) {
+    await copyFile(engineReport, join(reportDir, "native-engine-report.json"));
   }
+  await writeFile(join(configDir, "placed-assets.json"), JSON.stringify(job.meta.placedAssets || [], null, 2));
+
   for (const name of ["materials.json", "vegetation-placements.json", "grass-placements.json", "water.json"]) {
     const source = join(artifacts, "config", name);
     if (await stat(source).then(() => true).catch(() => false)) {
@@ -318,11 +306,12 @@ async function processJob(job) {
     await writeFile(join(configDir, "materials.json"), JSON.stringify(job.meta.materials || [], null, 2));
   }
   await writeFile(join(configDir, "worker-job.json"), JSON.stringify({
-    generation: job.generation,
+    generation: job.meta.generation,
     params: job.meta.params,
     terrain: job.meta.terrain,
     options: job.meta.options,
     counts: job.meta.counts,
+    placedAssets: job.meta.placedAssets || [],
   }, null, 2));
 
   const ps = [
@@ -364,7 +353,9 @@ const server = createServer(async (req, res) => {
     return json(res, 200, {
       ok: true,
       worker: "island-forge",
-      blenderAvailable: Boolean(BLENDER),
+      engine: "ragekit",
+      nativeEngineAvailable: existsSync(NATIVE_ENGINE),
+      blenderRequired: false,
     });
   }
   if (req.method === "POST" && url.pathname === "/api/export/jobs") {
@@ -418,5 +409,5 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log("Island Forge local export worker listening on " + HOST + ":" + PORT);
-  console.log("Blender: " + (BLENDER || "(not detected — source export remains available)"));
+  console.log("Native engine: " + (existsSync(NATIVE_ENGINE) ? NATIVE_ENGINE : "(not installed yet — source export remains available)"));
 });
