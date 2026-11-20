@@ -182,12 +182,21 @@ Terrain loadTerrain(const JsonValue& job, const fs::path& jobDirectory) {
     const size_t total = heightsCount + weightsCount + vegetationCount + landCount + propsCount + grassCount;
     const auto all = readFloats(binaryPath, total);
     size_t offset = 0;
-    terrain.heights.assign(all.begin() + static_cast<std::ptrdiff_t>(offset), all.begin() + static_cast<std::ptrdiff_t>(offset += heightsCount));
-    terrain.weights.assign(all.begin() + static_cast<std::ptrdiff_t>(offset), all.begin() + static_cast<std::ptrdiff_t>(offset += weightsCount));
-    terrain.vegetation.assign(all.begin() + static_cast<std::ptrdiff_t>(offset), all.begin() + static_cast<std::ptrdiff_t>(offset += vegetationCount));
-    terrain.land.assign(all.begin() + static_cast<std::ptrdiff_t>(offset), all.begin() + static_cast<std::ptrdiff_t>(offset += landCount));
-    terrain.props.assign(all.begin() + static_cast<std::ptrdiff_t>(offset), all.begin() + static_cast<std::ptrdiff_t>(offset += propsCount));
-    terrain.grass.assign(all.begin() + static_cast<std::ptrdiff_t>(offset), all.begin() + static_cast<std::ptrdiff_t>(offset + grassCount));
+    const auto copyRange = [&](std::vector<float>& target, size_t length) {
+        const size_t begin = offset;
+        const size_t end = begin + length;
+        if (end > all.size()) throw std::runtime_error("Un tableau du buffer terrain dépasse les données reçues.");
+        target.assign(all.begin() + static_cast<std::ptrdiff_t>(begin),
+                      all.begin() + static_cast<std::ptrdiff_t>(end));
+        offset = end;
+    };
+    copyRange(terrain.heights, heightsCount);
+    copyRange(terrain.weights, weightsCount);
+    copyRange(terrain.vegetation, vegetationCount);
+    copyRange(terrain.land, landCount);
+    copyRange(terrain.props, propsCount);
+    copyRange(terrain.grass, grassCount);
+    if (offset != all.size()) throw std::runtime_error("Le buffer terrain contient des données inattendues.");
     return terrain;
 }
 
