@@ -14,6 +14,7 @@ import {
   allowedCellSizes, allowedMeshCells, formatWorldSize,
   type IslandSettings, type TerrainData, type MaterialLayer,
 } from "@/lib/terrain";
+import { GUNWARE_MATERIALS_BY_ROLE } from "@/lib/gunware-materials";
 import { generateIslandAsync } from "@/lib/generation-client";
 import { exportIslandPackage } from "@/lib/exporter";
 import type { BrushTool, CanvasLayers, HistoryStatus, IslandCanvasHandle, PlayerStatus, ViewMode } from "@/components/island-canvas";
@@ -166,17 +167,19 @@ function SurfacePanel({
     <div className="tab-pane">
       <div className="tab-head">Surface</div>
       <div className="tab-sub">Matériaux, herbe, arbres et rochers</div>
-      <Section title="Matériaux">
+      <Section title="Matériaux GunWare">
         {MATERIAL_OPTIONS.map((material, index) => (
           <div className="layer-select-row" key={material.id}>
             <span className="layer-color" style={{ background: material.color }} />
-            <span className="layer-role">{["Plage", "Herbe", "Roche", "Forêt / terre"][index]}</span>
+            <span className="layer-role">{["Plage", "Herbe", "Roche", "Terre"][index]}</span>
             <select value={settings.layers[index]} onChange={(event) => {
               const next = [...settings.layers] as MaterialLayer[];
               next[index] = event.target.value as MaterialLayer;
               update("layers", next);
             }}>
-              {MATERIAL_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+              {GUNWARE_MATERIALS_BY_ROLE[index].map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
             </select>
           </div>
         ))}
