@@ -4,10 +4,10 @@ The browser editor sends edited terrain buffers and selected GunWare material re
 
 ## Configuration
 
-\`\`\`dotenv
+```dotenv
 ISLAND_EXPORT_BRIDGE_URL=http://127.0.0.1:8787
 ISLAND_EXPORT_BRIDGE_TOKEN=a-long-random-secret
-\`\`\`
+```
 
 The app adds Authorization: Bearer <token> when configured. Keep the bridge on a private network, behind a firewall, and never expose it directly to the public internet.
 
@@ -21,7 +21,7 @@ POST {ISLAND_EXPORT_BRIDGE_URL}/api/export/jobs
 
 Example body (abbreviated):
 
-\`\`\`json
+```json
 {
   "params": {
     "name": "gw_island",
@@ -77,7 +77,7 @@ Example body (abbreviated):
   },
   "preview": null
 }
-\`\`\`
+```
 
 The edits binary is base64-encoded. Decode it, decompress gzip when compression is gzip, then read Float32 little-endian values in this exact order:
 
@@ -94,9 +94,9 @@ The materials array is ordered by terrain slot. diffuseTextureDictionary and nor
 
 Successful response:
 
-\`\`\`json
+```json
 { "id": "job_123", "state": "running" }
-\`\`\`
+```
 
 Errors should be JSON with an error or message field and an appropriate HTTP status.
 
@@ -106,7 +106,7 @@ GET /api/export/jobs/:id
 
 The proxy forwards to the same path on the bridge. Suggested response while running:
 
-\`\`\`json
+```json
 {
   "id": "job_123",
   "state": "running",
@@ -114,7 +114,7 @@ The proxy forwards to the same path on the bridge. Suggested response while runn
   "done": 3,
   "total": 8
 }
-\`\`\`
+```
 
 On success return state: "done"; on failure return state: "error" and an error or message string.
 
