@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .blend1
+*.blend
 *.zip
 .DS_Store
 
@@ -12,8 +13,13 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
+
+# Local Island Forge worker data
+.islandforge/
+native-worker/island-worker-data/
+
+# Optional local environment overrides
 .env*
-!.env.example
 
 # generated exports
 dist/

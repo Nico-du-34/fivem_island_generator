@@ -453,22 +453,20 @@ function GrassBatch({ data, visible, vegetationRevision }: { data: TerrainData; 
 
 function Ocean({ size, visible, waves }: { size: number; visible: boolean; waves: boolean }) {
   const material = useMemo(() => new THREE.ShaderMaterial({
-    transparent: true,
+    transparent: false,
     uniforms: { uTime: { value: 0 }, uWaves: { value: waves ? 1 : 0 } },
     vertexShader: `
-      varying vec2 vUv;
       varying vec3 vWorldPosition;
       varying float vWave;
       uniform float uTime;
       uniform float uWaves;
       void main() {
-        vUv = uv;
         vec3 p = position;
-        float a = sin(p.x * 0.0017 + uTime * 0.55);
-        float b = cos(p.y * 0.0022 - uTime * 0.42);
-        float c = sin((p.x + p.y) * 0.004 + uTime * 0.22);
-        p.z += (a * 0.32 + b * 0.22 + c * 0.08) * uWaves;
-        vWave = a * 0.5 + b * 0.35 + c * 0.15;
+        float swellA = sin(dot(p.xy, vec2(0.0013, 0.0008)) + uTime * 0.34);
+        float swellB = sin(dot(p.xy, vec2(-0.0007, 0.0011)) - uTime * 0.26);
+        float swellC = sin(dot(p.xy, vec2(0.0021, -0.0016)) + uTime * 0.18);
+        p.z += (swellA * 0.22 + swellB * 0.14 + swellC * 0.07) * uWaves;
+        vWave = (swellA * 0.5 + swellB * 0.32 + swellC * 0.18);
         vec4 world = modelMatrix * vec4(p, 1.0);
         vWorldPosition = world.xyz;
         gl_Position = projectionMatrix * viewMatrix * world;
@@ -476,32 +474,38 @@ function Ocean({ size, visible, waves }: { size: number; visible: boolean; waves
     `,
     fragmentShader: `
       precision highp float;
-      varying vec2 vUv;
       varying vec3 vWorldPosition;
       varying float vWave;
       uniform float uTime;
       void main() {
-        vec2 uv = vWorldPosition.xy * 0.0013;
-        float longWave = sin(uv.x * 5.5 + uv.y * 2.1 + uTime * 0.24);
-        float crossWave = cos(uv.y * 6.8 - uv.x * 1.7 - uTime * 0.18);
-        float ripples = sin(uv.x * 26.0 + uTime * 0.55) * cos(uv.y * 21.0 - uTime * 0.42);
-        float caustics = smoothstep(0.46, 0.93, longWave * crossWave * 0.5 + 0.5 + ripples * 0.08);
-        vec3 deep = vec3(0.012, 0.075, 0.105);
-        vec3 coastal = vec3(0.035, 0.235, 0.245);
-        vec3 surface = vec3(0.07, 0.34, 0.34);
-        float depthGradient = clamp(0.30 + vUv.y * 0.28 + vWave * 0.1, 0.0, 1.0);
-        vec3 water = mix(deep, coastal, depthGradient);
-        water = mix(water, surface, caustics * 0.16);
+        vec2 p = vWorldPosition.xy;
+        // Two long, low-frequency wave directions create broad movement.
+        // Avoid multiplying high-frequency sine fields: that produced the
+        // visible repeating checkerboard on the previous ocean shader.
+        float waveA = sin(dot(p, vec2(0.00115, 0.00072)) + uTime * 0.30);
+        float waveB = sin(dot(p, vec2(-0.00066, 0.00142)) - uTime * 0.21);
+        float waveC = sin(dot(p, vec2(0.0027, -0.0019)) + uTime * 0.16);
+        float broad = waveA * 0.48 + waveB * 0.34 + waveC * 0.18;
+        float ripple = sin(dot(p, vec2(0.008, 0.005)) + uTime * 0.52);
+        float crest = smoothstep(0.38, 0.92, broad + ripple * 0.07);
+
+        vec3 deep = vec3(0.008, 0.055, 0.083);
+        vec3 mid = vec3(0.018, 0.135, 0.165);
+        vec3 shallow = vec3(0.045, 0.245, 0.255);
+        float variation = clamp(0.43 + broad * 0.10 + vWave * 0.06, 0.22, 0.68);
+        vec3 water = mix(deep, mid, variation);
+        water = mix(water, shallow, crest * 0.12);
         vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
-        float fresnel = pow(1.0 - max(dot(viewDirection, vec3(0.0, 0.0, 1.0)), 0.0), 3.0);
-        water = mix(water, vec3(0.31, 0.58, 0.55), fresnel * 0.28);
-        water += vec3(0.015, 0.026, 0.028) * max(vWave, 0.0);
-        gl_FragColor = vec4(water, 0.96);
+        float fresnel = pow(1.0 - max(dot(viewDirection, vec3(0.0, 0.0, 1.0)), 0.0), 4.0);
+        water = mix(water, vec3(0.24, 0.42, 0.43), fresnel * 0.18);
+        water += vec3(0.008, 0.014, 0.016) * max(vWave, 0.0) * uWaves;
+        gl_FragColor = vec4(water, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }
     `,
-    depthWrite: false,
+    depthWrite: true,
+    side: THREE.DoubleSide,
     toneMapped: true,
   }), []);
   useFrame((state) => {
@@ -509,8 +513,8 @@ function Ocean({ size, visible, waves }: { size: number; visible: boolean; waves
     material.uniforms.uWaves.value = waves ? 1 : 0;
   });
   return (
-    <mesh position={[0, 0, 0]} visible={visible}>
-      <planeGeometry args={[size * 1.8, size * 1.8, 1, 1]} />
+    <mesh position={[0, 0, 0]} visible={visible} renderOrder={-1}>
+      <planeGeometry args={[size * 1.8, size * 1.8, 96, 96]} />
       <primitive object={material} attach="material" />
     </mesh>
   );

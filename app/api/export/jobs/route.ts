@@ -1,20 +1,17 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const LOCAL_BRIDGE = "http://127.0.0.1:8787";
+const LOCAL_TOKEN = "islandforge-local-development-only";
+
 function bridgeConfig() {
-  const base = process.env.ISLAND_EXPORT_BRIDGE_URL?.trim().replace(/\/+$/, "");
-  const token = process.env.ISLAND_EXPORT_BRIDGE_TOKEN?.trim();
+  const base = process.env.ISLAND_EXPORT_BRIDGE_URL?.trim().replace(/\/+$/, "") || LOCAL_BRIDGE;
+  const token = process.env.ISLAND_EXPORT_BRIDGE_TOKEN?.trim() || LOCAL_TOKEN;
   return { base, token };
 }
 
 export async function POST(request: Request) {
   const { base, token } = bridgeConfig();
-  if (!base) {
-    return Response.json({
-      code: "bridge_missing",
-      error: "Le service d'export natif CodeWalker n'est pas configuré. Utilise l'export source OBJ/GLB ou configure ISLAND_EXPORT_BRIDGE_URL.",
-    }, { status: 503 });
-  }
 
   let payload: unknown;
   try {
@@ -36,7 +33,7 @@ export async function POST(request: Request) {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(payload),
       cache: "no-store",
@@ -48,7 +45,10 @@ export async function POST(request: Request) {
       headers: { "content-type": contentType, "cache-control": "no-store" },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Bridge inaccessible.";
-    return Response.json({ code: "bridge_unavailable", error: `Impossible de joindre le service d'export : ${message}` }, { status: 502 });
+    const message = error instanceof Error ? error.message : "Worker local inaccessible.";
+    return Response.json({
+      code: "bridge_unavailable",
+      error: `Impossible de joindre le worker local : ${message}. Lance l'application avec npm run dev.`,
+    }, { status: 502 });
   }
 }

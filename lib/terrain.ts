@@ -327,6 +327,20 @@ function createTerrainSampler(p: IslandSettings): TerrainSampler {
     relief += p.mountains * Math.pow(ridges, 1.45) * peakMask * 0.95;
     relief += p.mountains * Math.pow(Math.max(0, broad - 0.55), 1.5) * peakMask * 0.45;
 
+    // Add mid/high-frequency landform detail so large islands do not read as
+    // smooth noise domes. These layers are spatially warped to avoid concentric bands.
+    const detailWarp = shapeNoise.fbm(wx * 3.2 + 9.1, wy * 3.2 - 6.7, 3);
+    const terrainDetail = shapeNoise.fbm(
+      wx * 10.5 + detailWarp * 2.8 + 13.4,
+      wy * 10.5 - detailWarp * 2.2 - 5.8,
+      4,
+    );
+    const microDetail = shapeNoise.fbm(wx * 24.0 + 2.7, wy * 24.0 - 8.4, 3);
+    relief += peakMask * inland * (
+      terrainDetail * (0.055 * p.hills + 0.028 * p.mountains) +
+      microDetail * (0.018 + 0.022 * p.hills)
+    );
+
     if (p.shape === "volcano") {
       const normalizedRadius = radius / Math.max(0.05, p.coverage);
       const ring = Math.exp(-Math.pow((normalizedRadius - 0.48) / 0.2, 2));
@@ -336,14 +350,26 @@ function createTerrainSampler(p: IslandSettings): TerrainSampler {
       relief = inland * (0.08 + hills * p.hills * 0.12);
     }
 
-    if (p.terraces > 0.001 && coast > 0) {
-      const stepHeight = Math.max(3, p.maxHeight / 9);
-      const stepped = Math.floor((relief * p.maxHeight) / stepHeight);
-      relief = (relief * p.maxHeight + (stepped * stepHeight - relief * p.maxHeight) * p.terraces) / Math.max(1, p.maxHeight);
-    }
-
     if (coast > 0) {
-      const rawHeight = Math.max(0, relief) * p.maxHeight;
+      let rawHeight = Math.max(0, relief) * p.maxHeight;
+
+      // Plateaux are broken by two independent noise scales and only affect
+      // higher inland terrain. This prevents the old circular contour rings.
+      if (p.terraces > 0.001 && peakMask > 0.02 && p.shape !== "atoll") {
+        const stepHeight = Math.max(8, p.maxHeight / 16);
+        const contourWarp =
+          shapeNoise.fbm(wx * 5.3 + rawHeight * 0.0025, wy * 5.3 - rawHeight * 0.0018, 4) * 0.78 +
+          shapeNoise.fbm(wx * 13.2 - 3.4, wy * 13.2 + 8.6, 3) * 0.24;
+        const level = rawHeight / stepHeight + contourWarp;
+        const baseLevel = Math.floor(level);
+        const phase = level - baseLevel;
+        const shelf = smoothstep(0.10, 0.24, phase) * (1 - smoothstep(0.72, 0.90, phase));
+        const terracedHeight = baseLevel * stepHeight + stepHeight * (0.18 + shelf * 0.52) - contourWarp * stepHeight * 0.30;
+        const upperTerrain = smoothstep(0.12, 0.62, rawHeight / Math.max(1, p.maxHeight));
+        const influence = clamp(p.terraces * 0.72 * peakMask * upperTerrain);
+        rawHeight += (terracedHeight - rawHeight) * influence;
+      }
+
       return { height: rawHeight, land, coast, slopeHint: 0 };
     }
 

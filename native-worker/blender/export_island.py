@@ -98,6 +98,8 @@ def material_texture_paths(material, textures_dir: Path):
     material_id = material["id"]
     configured = Path(os.environ.get("GUNWARE_TEXTURE_DIR", "")) if os.environ.get("GUNWARE_TEXTURE_DIR") else None
     roots = [configured] if configured else []
+    # Optional user-supplied replacements live here by default; no env file is needed.
+    roots.append(Path(__file__).resolve().parents[1] / "textures")
     roots.append(textures_dir)
     result = []
     for suffix in ("diffuse", "normal"):

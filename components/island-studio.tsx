@@ -144,7 +144,7 @@ function TerrainPanel({
       </Section>
       <div className="panel-generate">
         <button className="btn primary btn-wide" onClick={generate} disabled={busy}><RefreshCw size={14} className={busy ? "spin" : ""} />{busy ? "Génération…" : dirty ? "Régénérer la carte" : "Générer la carte"}</button>
-        <small>Les modifications sont appliquées après génération.</small>
+        <small className={dirty ? "is-dirty" : ""}>{dirty ? "Réglages modifiés : clique sur « Régénérer la carte » pour voir le résultat." : "La carte est à jour."}</small>
       </div>
     </div>
   );
@@ -790,7 +790,7 @@ export default function IslandStudio() {
         <span className="status-indicator" />
         <span>{notice}</span>
         <span className="status-spacer" />
-        {busy ? <span>Génération {progress}%</span> : <span>{dirty ? "Modifications non générées" : "Carte synchronisée"}</span>}
+        {busy ? <span>Génération {progress}%</span> : <span className={dirty ? "status-pending" : ""}>{dirty ? "Réglages en attente — régénère la carte" : "Carte synchronisée"}</span>}
         <span>·</span><span>{generatedSettings.shape} · {formatWorldSize(generatedSettings.worldSize)}</span>
       </footer>
 

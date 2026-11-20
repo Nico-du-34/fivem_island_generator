@@ -1,15 +1,20 @@
 # Native export bridge contract
 
-The browser editor sends edited terrain buffers and selected GunWare material references to the Windows worker in [native-worker/](../native-worker/). The worker uses Blender, Sollumz, szio and PyMateria to produce native YDR/YBN/YMAP/YTYP/YTD resources. The Next.js API routes are an authenticated proxy only. The worker reopens each native YMAP with szio before it marks the ZIP ready. CodeWalker is optional for inspection/editing, not required as a conversion step.
+The browser editor sends edited terrain buffers and selected GunWare material references to the local Windows worker in [native-worker/](../native-worker/). The worker uses Blender, Sollumz, szio and PyMateria to produce native YDR/YBN/YMAP/YTYP/YTD resources. The Next.js API routes proxy to 127.0.0.1:8787 by default. The worker reopens each native YMAP with szio before it marks the ZIP ready. CodeWalker is optional for inspection/editing, not required as a conversion step.
 
-## Configuration
+## Démarrage local sans .env
 
-```dotenv
-ISLAND_EXPORT_BRIDGE_URL=http://127.0.0.1:8787
-ISLAND_EXPORT_BRIDGE_TOKEN=a-long-random-secret
-```
+Depuis la racine du dépôt, exécute :
 
-The app adds Authorization: Bearer <token> when configured. Keep the bridge on a private network, behind a firewall, and never expose it directly to the public internet.
+~~~powershell
+npm install
+npm run dev
+~~~
+
+Le script scripts/run-local.mjs démarre Next.js et le worker local dans le même terminal. Il détecte Blender et Sollumz dans les emplacements Windows habituels. Les routes API utilisent automatiquement 127.0.0.1:8787 et un jeton réservé au loopback local. Aucun fichier .env n'est nécessaire.
+
+Pour lancer uniquement le worker : npm run worker. Pour la procédure Windows et les prérequis, consulte [native-worker/README.md](../native-worker/README.md).
+
 
 ## 1. Create a job
 
@@ -17,7 +22,7 @@ POST /api/export/jobs
 
 The Next.js proxy forwards the JSON body to:
 
-POST {ISLAND_EXPORT_BRIDGE_URL}/api/export/jobs
+POST http://127.0.0.1:8787/api/export/jobs
 
 Example body (abbreviated):
 
@@ -91,7 +96,7 @@ The edits binary is base64-encoded. Decode it, decompress gzip when compression 
 
 The counts object is authoritative for array boundaries. Validate the exact total byte size before allocating geometry. The legacy heightsCount, blendCount, vegetationCount, propsCount and grassCount fields are also included for compatibility.
 
-The materials array is ordered by terrain slot. diffuseTextureDictionary and normalTextureDictionary are **texture names**, not image bytes. The web source ZIP includes procedural fallback PNG maps for Blender preview, but these must not be mislabelled as original GunWare/GTA textures. To build native YTD dictionaries, the Windows worker must resolve the named game textures from the matching legally available game archives (RPF), or use an explicitly supplied replacement texture set, then convert/package the required DDS images with mipmaps.
+The materials array is ordered by terrain slot. diffuseTextureDictionary and normalTextureDictionary are **texture names**, not image bytes. The web source ZIP includes procedural fallback PNG maps for Blender preview, but these must not be mislabelled as original GunWare/GTA textures. The Windows worker reads replacement images from native-worker/textures using <material-id>_diffuse.png and <material-id>_normal.png. If no replacement images exist, it creates procedural fallback maps for the YTD. The supplied GunWare source files did not include original bitmap data.
 
 Successful response:
 
@@ -155,35 +160,28 @@ Do not return state: "done" until the ZIP contains the required native files and
 
 ## Included Windows worker
 
-The repository contains a Node.js worker and a Blender background script:
+- native-worker/server.mjs — service HTTP loopback, validation de payload, file mono-worker, suivi de jobs et téléchargement ZIP.
+- native-worker/blender/export_island.py — reconstruction terrain, maillages en tuiles, collisions BVH, génération native YDR/YBN/YMAP/YTYP/YTD, hiérarchie LOD et relecture YMAP via szio.
+- scripts/run-local.mjs — démarrage automatique Next.js + worker local avec npm run dev ou npm start.
+- native-worker/README.md — prérequis et fonctionnement local, sans fichier .env.
 
-- native-worker/server.mjs — bearer-token HTTP service, payload validation, one-at-a-time queue, job polling and ZIP download.
-- native-worker/blender/export_island.py — terrain reconstruction, tile mesh creation, collision BVH, native YDR/YBN/YMAP/YTYP/YTD generation, LOD hierarchy and szio YMAP round-trip validation.
-- native-worker/README.md — Windows prerequisites and installation instructions.
+Le service écoute uniquement sur 127.0.0.1:8787. Ne le rends pas accessible publiquement.
 
-The worker listens on port 8787 by default. Configure the same ISLAND_EXPORT_BRIDGE_TOKEN on the Windows host and Next.js server. Never expose this service directly to the public internet.
+### Contrat de sortie native
 
-### Native output contract
+Le worker génère six niveaux visuels par tuile (HD, LOD, SLOD1–SLOD4), une collision BVH séparée, les archetypes YTYP, le dictionnaire YTD et le YMAP natif binaire. Les arbres et rochers sont des entités YMAP qui référencent les archétypes du jeu.
 
-The worker generates six visual LOD tiers per terrain tile (HD, LOD, SLOD1–SLOD4), a coarse independent BVH collision, YTYP archetypes, a YTD texture dictionary and a native binary YMAP. Tree and rock placements are YMAP entities referencing game archetypes.
+Le worker ne renvoie state done et nativeReady true qu'après :
+- la présence des fichiers YDR, YBN, YMAP, YTYP et YTD ;
+- la vérification de l'en-tête RSC7 du YMAP ;
+- la relecture de chaque YMAP avec szio.try_load_asset et la présence d'entités.
 
-The worker deliberately returns state done and nativeReady true only after:
-- YDR, YBN, YMAP, YTYP and YTD assets have all been found.
-- The native YMAP has the RSC7 header.
-- Each generated YMAP has been reopened through szio.try_load_asset and contains entities.
+Les XML CodeWalker facultatifs sont placés dans sources/cwxml/ comme fichiers sources modifiables. Ils ne servent pas à produire le binaire. CodeWalker est disponible pour inspection, pas comme étape de conversion obligatoire.
 
-The szio project test_maps.py demonstrates a native AssetMapData round-trip. The native provider calls PyMateria MapData.export_rsc; the Gen9 provider delegates map data to that shared writer:
-- https://github.com/Sollumz/szio/blob/main/tests/test_maps.py
-- https://github.com/Sollumz/szio/blob/main/src/szio/gta5/native/provider.py
-- https://github.com/Sollumz/szio/blob/main/src/szio/gta5/native/provider_gen9.py
+### Données natives qui restent à ajouter
 
-Optional CWXML source copies are placed in sources/cwxml/ for inspection and editing. They are not used to produce the binary map. CodeWalker is optional for reviewing the result, not a mandatory conversion step.
+- Les water quads GTA natifs ne sont pas encore créés ; les paramètres sont conservés dans config/water.json.
+- Les points d'herbe sont conservés dans config/grass-placements.json, mais ne sont pas encore sérialisés en YMAP grass instance lists natives.
+- Les noms des arbres et rochers sont des références à des archétypes GTA existants ; le worker ne garantit pas leur présence sur un build modifié.
+- Les textures de secours diffuse/normal sont générées quand aucune image locale n'est fournie. Les sources GunWare fournies contenaient les noms des textures GTA, pas les bitmaps originaux.
 
-### Still not emitted as native map data
-
-- Native GTA water quads are not built yet; water configuration is placed in config/water.json.
-- Grass points are preserved in config/grass-placements.json, but are not yet serialized as a native YMAP grass instance list.
-- Tree and rock model names are existing GTA archetype references; the worker does not bundle those models or guarantee their presence on a modified game build.
-- The worker creates generated fallback diffuse/normal PNGs when no image override is provided. The uploaded GunWare source bundle contained texture dictionary names, not the original source bitmaps. Use GUNWARE_TEXTURE_DIR for legally available texture replacements.
-
-See [native-worker/README.md](../native-worker/README.md) for Windows setup.

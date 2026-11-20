@@ -16,10 +16,35 @@ jobs:
           node-version: "20"
       - name: Install dependencies
         run: npm install
+      - name: Check local development launcher syntax
+        run: node --check scripts/run-local.mjs
       - name: Check Windows worker JavaScript syntax
         run: node --check native-worker/server.mjs
       - name: Check Blender worker Python syntax
         run: python3 -m py_compile native-worker/blender/export_island.py
+      - name: Smoke test npm run dev and local worker
+        shell: bash
+        run: |
+          npm run dev > /tmp/island-forge-dev.log 2>&1 &
+          pid=$!
+          cleanup() {
+            kill -TERM "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          web_ready=0
+          for attempt in {1..60}; do
+            if curl -fsS http://127.0.0.1:3000 >/dev/null; then
+              web_ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$web_ready" != "1" ]; then
+            cat /tmp/island-forge-dev.log
+            exit 1
+          fi
+          curl -fsS -H "Authorization: Bearer islandforge-local-development-only" http://127.0.0.1:8787/health | grep -q '"ok":true'
       - name: Type check
         run: npm run typecheck
       - name: Build

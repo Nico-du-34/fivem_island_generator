@@ -1,13 +1,12 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
-  const base = process.env.ISLAND_EXPORT_BRIDGE_URL?.trim().replace(/\/+$/, "");
-  const token = process.env.ISLAND_EXPORT_BRIDGE_TOKEN?.trim();
-  if (!base) {
-    return Response.json({ code: "bridge_missing", error: "Service d'export natif non configuré." }, { status: 503 });
-  }
+const LOCAL_BRIDGE = "http://127.0.0.1:8787";
+const LOCAL_TOKEN = "islandforge-local-development-only";
 
+export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const base = process.env.ISLAND_EXPORT_BRIDGE_URL?.trim().replace(/\/+$/, "") || LOCAL_BRIDGE;
+  const token = process.env.ISLAND_EXPORT_BRIDGE_TOKEN?.trim() || LOCAL_TOKEN;
   const { id } = await context.params;
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) {
     return Response.json({ error: "Identifiant de tâche invalide." }, { status: 400 });
@@ -15,7 +14,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   try {
     const upstream = await fetch(`${base}/api/export/jobs/${encodeURIComponent(id)}/file`, {
-      headers: token ? { authorization: `Bearer ${token}` } : {},
+      headers: { authorization: `Bearer ${token}` },
       cache: "no-store",
       signal: AbortSignal.timeout(60_000),
     });
@@ -28,6 +27,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     if (length) headers.set("content-length", length);
     return new Response(upstream.body, { status: upstream.status, headers });
   } catch {
-    return Response.json({ code: "bridge_unavailable", error: "Le fichier d'export est inaccessible." }, { status: 502 });
+    return Response.json({
+      code: "bridge_unavailable",
+      error: "Le worker local ne répond pas. Vérifie que l'application a été lancée avec npm run dev.",
+    }, { status: 502 });
   }
 }
