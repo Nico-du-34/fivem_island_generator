@@ -295,3 +295,45 @@ code, kbd { font-family: var(--mono); }
   .tb-controls { flex-wrap: wrap; gap: 7px; }
   .play-keys { flex-wrap: wrap; width: calc(100% - 25px); justify-content: center; white-space: normal; }
 }
+
+
+/* GTA world viewport */
+.gta-world-stage { position: absolute; inset: 0; z-index: 2; overflow: hidden; background: #0a111c; }
+.gta-world-leaflet { position: absolute; inset: 0; width: 100%; height: 100%; background: #0a111c; cursor: crosshair; }
+.gta-world-leaflet .leaflet-container { width: 100%; height: 100%; background: #0a111c; font-family: var(--font); }
+.gta-world-leaflet .leaflet-control-zoom { border: 1px solid #ffffff20 !important; border-radius: 7px !important; overflow: hidden; box-shadow: 0 8px 28px #0008 !important; }
+.gta-world-leaflet .leaflet-control-zoom a { background: #151b2a !important; color: #e6ebf8 !important; border-color: #ffffff17 !important; }
+.gta-world-credit, .gta-world-3d-caption { position: absolute; z-index: 500; left: 14px; bottom: 12px; padding: 7px 10px; border: 1px solid #ffffff1b; border-radius: 6px; background: #0b111dd9; color: #aab4c8; font-size: 9px; backdrop-filter: blur(9px); }
+.gta-world-credit a { color: #a9bbff; text-decoration: none; }
+.gta-world-credit a:hover { text-decoration: underline; }
+.gta-world-3d-caption { z-index: 2; }
+.world-asset-label { display: block; padding: 3px 6px; border: 1px solid #f6b75b66; border-radius: 4px; background: #1a1d27e8; color: #ffe4b5; font: 10px var(--mono); white-space: nowrap; box-shadow: 0 2px 10px #0009; }
+
+.gta-map-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border: 1px solid var(--border-mid); border-radius: 6px; background: var(--bg); margin: 8px 0 10px; }
+.gta-map-mode button { height: 28px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-dim); font-size: 9px; font-weight: 700; cursor: pointer; }
+.gta-map-mode button.is-active { background: var(--accent-soft); color: #c2ccff; border-color: var(--accent-dim); }
+.gta-data-tabs { display: grid; grid-template-columns: repeat(4,1fr); gap: 3px; margin: 8px 0; }
+.gta-data-tab { min-width: 0; height: 25px; padding: 0 3px; border: 1px solid var(--border-mid); border-radius: 4px; background: var(--panel-elev); color: var(--text-dim); font-size: 8px; cursor: pointer; }
+.gta-data-tab.is-active { border-color: var(--accent-dim); background: var(--accent-soft); color: #c2ccff; }
+.gta-data-search { width: 100%; height: 30px; margin: 2px 0 6px; padding: 0 9px; border: 1px solid var(--border-mid); border-radius: 5px; outline: 0; background: var(--bg); color: var(--text); font-size: 10px; }
+.gta-data-search:focus { border-color: var(--accent-dim); }
+.gta-data-meta { display: flex; justify-content: space-between; gap: 8px; margin: 5px 0; color: var(--text-faint); font-size: 8px; }
+.gta-data-meta span { color: #7587b7; }
+.gta-data-results { display: flex; flex-direction: column; max-height: 238px; overflow: auto; border: 1px solid var(--border-mid); border-radius: 5px; background: #0c101a; }
+.gta-data-row { display: flex; align-items: center; gap: 6px; min-height: 38px; padding: 5px 7px; border-bottom: 1px solid var(--border); }
+.gta-data-row:last-child { border-bottom: 0; }
+.gta-data-item { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.gta-data-item strong, .gta-placed-row strong { overflow: hidden; color: #cdd5e7; font: 9px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.gta-data-item small, .gta-placed-row small { color: var(--text-faint); font-size: 8px; }
+.gta-data-action { flex-shrink: 0; padding: 5px 7px; border: 1px solid #6478d066; border-radius: 4px; background: #526bc31b; color: #b8c6ff; font-size: 8px; cursor: pointer; }
+.gta-data-action:hover { border-color: #8293ed; background: #526bc333; }
+.gta-data-action.danger { border-color: #a34d4d55; background: #a34d4d17; color: #f0a3a3; }
+.gta-data-error, .gta-data-empty-state { padding: 10px 8px; color: var(--text-faint); font-size: 9px; line-height: 1.5; }
+.gta-data-error { color: #e9a2a2; }
+.gta-data-empty { color: var(--text-faint); font-size: 9px; }
+.gta-placed-list { display: flex; flex-direction: column; gap: 5px; }
+.gta-placed-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px; border: 1px solid var(--border-mid); border-radius: 5px; background: var(--bg); }
+.gta-placed-row > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+@media (max-width: 1050px) {
+  .gta-data-results { max-height: 180px; }
+}
