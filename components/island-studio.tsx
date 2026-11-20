@@ -335,7 +335,7 @@ function GtaDataBrowser({
 
 function WorldPanel({
   settings, update, mapMode, setMapMode, mapStyle, setMapStyle,
-  assets, onAddAsset, onRemoveAsset,
+  assets, onAddAsset, onRemoveAsset, onUpdateAsset,
 }: {
   settings: IslandSettings;
   update: <K extends keyof IslandSettings>(key: K, value: IslandSettings[K]) => void;
@@ -346,6 +346,7 @@ function WorldPanel({
   assets: GtaPlacedAsset[];
   onAddAsset: (name: string) => void;
   onRemoveAsset: (id: string) => void;
+  onUpdateAsset: (id: string, patch: Partial<GtaPlacedAsset>) => void;
 }) {
   const verdict = getPlacementVerdict(settings.originX, settings.originY, settings.worldSize, settings.ignoreGtaMap);
   const [location, setLocation] = useState("");
@@ -393,8 +394,17 @@ function WorldPanel({
         <div className="gta-placed-list">
           {assets.map((asset) => (
             <div className="gta-placed-row" key={asset.id}>
-              <div><strong>{asset.name}</strong><small>{asset.x}, {asset.y}, {asset.z}</small></div>
-              <button type="button" className="gta-data-action danger" onClick={() => onRemoveAsset(asset.id)}>Retirer</button>
+              <div className="gta-placed-head">
+                <strong title={asset.name}>{asset.name}</strong>
+                <button type="button" className="gta-data-action danger" onClick={() => onRemoveAsset(asset.id)}>Retirer</button>
+              </div>
+              <div className="gta-placed-fields">
+                <label>X<input type="number" step="1" value={Math.round(asset.x)} onChange={(event) => onUpdateAsset(asset.id, { x: Number(event.target.value) || 0 })} /></label>
+                <label>Y<input type="number" step="1" value={Math.round(asset.y)} onChange={(event) => onUpdateAsset(asset.id, { y: Number(event.target.value) || 0 })} /></label>
+                <label>Cap<input type="number" step="5" value={Math.round(asset.heading)} onChange={(event) => onUpdateAsset(asset.id, { heading: Number(event.target.value) || 0 })} /></label>
+                <label>Échelle<input type="number" min="0.05" max="50" step="0.05" value={asset.scale} onChange={(event) => onUpdateAsset(asset.id, { scale: Math.max(0.05, Math.min(50, Number(event.target.value) || 1)) })} /></label>
+              </div>
+              <small className="gta-placed-coords">Coordonnées monde GTA · Z {asset.z.toFixed(1)} m</small>
             </div>
           ))}
         </div>
@@ -532,6 +542,10 @@ export default function IslandStudio() {
 
   const removePlacedAsset = useCallback((id: string) => {
     setPlacedAssets((current) => current.filter((asset) => asset.id !== id));
+  }, []);
+
+  const updatePlacedAsset = useCallback((id: string, patch: Partial<GtaPlacedAsset>) => {
+    setPlacedAssets((current) => current.map((asset) => asset.id === id ? { ...asset, ...patch } : asset));
   }, []);
 
   const generate = useCallback(async (override?: IslandSettings) => {
@@ -854,7 +868,7 @@ export default function IslandStudio() {
         <aside className="panel">
           {activeTab === "terrain" && <TerrainPanel settings={settings} update={update} generate={() => void generate()} dirty={dirty} busy={busy} />}
           {activeTab === "surface" && <SurfacePanel settings={settings} update={update} layers={layers} setLayer={setLayer} />}
-          {activeTab === "world" && <WorldPanel settings={settings} update={update} mapMode={worldMapMode} setMapMode={setWorldMapMode} mapStyle={worldMapStyle} setMapStyle={setWorldMapStyle} assets={placedAssets} onAddAsset={addPlacedAsset} onRemoveAsset={removePlacedAsset} />}
+          {activeTab === "world" && <WorldPanel settings={settings} update={update} mapMode={worldMapMode} setMapMode={setWorldMapMode} mapStyle={worldMapStyle} setMapStyle={setWorldMapStyle} assets={placedAssets} onAddAsset={addPlacedAsset} onRemoveAsset={removePlacedAsset} onUpdateAsset={updatePlacedAsset} />}
           {activeTab === "export" && <ExportPanel data={terrain} settings={generatedSettings} setWaves={(value) => { setSettings((current) => ({ ...current, waves: value })); setGeneratedSettings((current) => ({ ...current, waves: value })); }} dirty={dirty} gameGen={gameGen} setGameGen={setGameGen} xml={xml} setXml={setXml} sourceExport={() => void sourceExport()} nativeExport={() => void nativeExport()} exporting={exporting} exportProgress={exportProgress} exportStatus={exportStatus} />}
         </aside>
 
