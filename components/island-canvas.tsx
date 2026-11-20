@@ -7,7 +7,8 @@ import {
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
-import { applyBrushInPlace, type IslandSettings, type MaterialLayer, type TerrainData } from "@/lib/terrain";
+import { applyBrushInPlace, type IslandSettings, type TerrainData } from "@/lib/terrain";
+import { getGunwareMaterial } from "@/lib/gunware-materials";
 
 export type BrushTool = "orbit" | "raise" | "lower" | "smooth" | "flatten" | "paint" | "erase" | "vegRemove" | "vegAdd";
 export type ViewMode = "render" | "height" | "material" | "wireframe";
@@ -160,13 +161,10 @@ function TerrainMesh({
       return new THREE.MeshBasicMaterial({ color: "#8996b9", wireframe: true, transparent: true, opacity: 0.62 });
     }
     const mode = viewMode === "height" ? 1 : viewMode === "material" ? 2 : 0;
-    const palette: Record<MaterialLayer, string> = {
-      sand_beach: "#c8b17d",
-      grass_lush: "#3f713c",
-      rock_cliff: "#77766e",
-      dirt_forest: "#795d42",
-    };
-    const layerColors = settings.layers.map((layer) => new THREE.Color(palette[layer] ?? "#777777"));
+    const layerRoles = [0, 1, 2, 3] as const;
+    const layerColors = settings.layers.map((layer, index) =>
+      new THREE.Color(getGunwareMaterial(layer, layerRoles[index]).tint),
+    );
     return new THREE.ShaderMaterial({
       uniforms: {
         uMaxHeight: { value: Math.max(1, data.maxHeight) },
@@ -174,7 +172,8 @@ function TerrainMesh({
         uLayer0: { value: layerColors[0] ?? new THREE.Color("#c8b17d") },
         uLayer1: { value: layerColors[1] ?? new THREE.Color("#3f713c") },
         uLayer2: { value: layerColors[2] ?? new THREE.Color("#77766e") },
-        uLayer3: { value: layerColors[3] ?? new THREE.Color("#795d42") },
+        uLayer3: { value: layerColors[3] ?? new THREE.Color("#6e5f45") },
+        uTexScale: { value: Math.max(1, settings.texScale) },
       },
       vertexShader: `
         attribute vec4 blendWeights;
@@ -199,6 +198,7 @@ function TerrainMesh({
         uniform vec3 uLayer1;
         uniform vec3 uLayer2;
         uniform vec3 uLayer3;
+        uniform float uTexScale;
         varying vec4 vWeights;
         varying vec3 vNormal;
         varying vec3 vWorldPosition;
@@ -230,7 +230,7 @@ function TerrainMesh({
       side: THREE.DoubleSide,
       toneMapped: true,
     });
-  }, [viewMode, data.maxHeight, settings.layers]);
+  }, [viewMode, data.maxHeight, settings.layers, settings.texScale]);
 
   useEffect(() => {
     if (meshRef.current && refreshRevision > 0) restoreGeometry(meshRef.current.geometry, data);
@@ -330,30 +330,48 @@ function PropsBatch({ data, visible, vegetationRevision }: { data: TerrainData; 
     }
     return { trees: new Float32Array(trees), rocks: new Float32Array(rocks) };
   }, [data, vegetationRevision]);
-  const treeRef = useRef<THREE.InstancedMesh>(null);
+  const frondRef = useRef<THREE.InstancedMesh>(null);
   const trunkRef = useRef<THREE.InstancedMesh>(null);
   const rockRef = useRef<THREE.InstancedMesh>(null);
-  const treeGeo = useMemo(() => new THREE.ConeGeometry(0.9, 3.4, 7), []);
-  const trunkGeo = useMemo(() => new THREE.CylinderGeometry(0.09, 0.15, 2.3, 6), []);
+  const frondGeo = useMemo(() => {
+    const geometry = new THREE.ConeGeometry(0.13, 2.2, 5, 1);
+    geometry.rotateX(Math.PI / 2);
+    return geometry;
+  }, []);
+  const trunkGeo = useMemo(() => {
+    const geometry = new THREE.CylinderGeometry(0.08, 0.15, 2.5, 7);
+    geometry.rotateX(Math.PI / 2);
+    return geometry;
+  }, []);
   const rockGeo = useMemo(() => new THREE.IcosahedronGeometry(1, 0), []);
-  const treeMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#3d7840", roughness: 1 }), []);
+  const frondMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#3d7840", roughness: 1 }), []);
   const trunkMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#806044", roughness: 1 }), []);
   const rockMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#77766e", roughness: 1 }), []);
   useEffect(() => {
     const temp = new THREE.Object3D();
+    const up = new THREE.Vector3(0, 0, 1);
     for (let i = 0; i < split.trees.length; i += 6) {
-      const j = i / 6, x = split.trees[i], y = split.trees[i + 1], z = split.trees[i + 2], scale = split.trees[i + 3], rot = split.trees[i + 4];
-      temp.position.set(x, y, z + scale * 1.45);
+      const j = i / 6;
+      const x = split.trees[i], y = split.trees[i + 1], z = split.trees[i + 2];
+      const scale = split.trees[i + 3], rot = split.trees[i + 4];
+      temp.position.set(x, y, z + scale * 1.1);
       temp.rotation.set(0, 0, rot);
-      temp.scale.setScalar(scale);
-      temp.updateMatrix();
-      treeRef.current?.setMatrixAt(j, temp.matrix);
-      temp.position.set(x, y, z + scale * 0.7);
-      temp.scale.set(scale * 0.18, scale * 0.18, scale * 0.85);
+      temp.scale.set(scale * 0.9, scale * 0.9, scale * 0.95);
       temp.updateMatrix();
       trunkRef.current?.setMatrixAt(j, temp.matrix);
+
+      // Six tapered fronds create a readable low-poly tropical palm crown.
+      for (let frond = 0; frond < 6; frond++) {
+        const angle = rot + (frond / 6) * Math.PI * 2;
+        const direction = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0.34).normalize();
+        temp.position.set(x + Math.cos(angle) * scale * 0.33, y + Math.sin(angle) * scale * 0.33, z + scale * 2.2);
+        temp.quaternion.setFromUnitVectors(up, direction);
+        temp.scale.set(scale * 0.82, scale * 0.82, scale * 0.9);
+        temp.updateMatrix();
+        frondRef.current?.setMatrixAt(j * 6 + frond, temp.matrix);
+      }
     }
-    if (treeRef.current) treeRef.current.instanceMatrix.needsUpdate = true;
+    if (frondRef.current) frondRef.current.instanceMatrix.needsUpdate = true;
     if (trunkRef.current) trunkRef.current.instanceMatrix.needsUpdate = true;
     for (let i = 0; i < split.rocks.length; i += 6) {
       const j = i / 6, x = split.rocks[i], y = split.rocks[i + 1], z = split.rocks[i + 2], scale = split.rocks[i + 3], rot = split.rocks[i + 4];
@@ -367,7 +385,7 @@ function PropsBatch({ data, visible, vegetationRevision }: { data: TerrainData; 
   }, [split]);
   return (
     <>
-      <instancedMesh ref={treeRef} args={[treeGeo, treeMat, split.trees.length / 6]} visible={visible} castShadow receiveShadow />
+      <instancedMesh ref={frondRef} args={[frondGeo, frondMat, split.trees.length / 6 * 6]} visible={visible} castShadow receiveShadow />
       <instancedMesh ref={trunkRef} args={[trunkGeo, trunkMat, split.trees.length / 6]} visible={visible} castShadow receiveShadow />
       <instancedMesh ref={rockRef} args={[rockGeo, rockMat, split.rocks.length / 6]} visible={visible} castShadow receiveShadow />
     </>
@@ -376,7 +394,7 @@ function PropsBatch({ data, visible, vegetationRevision }: { data: TerrainData; 
 
 function GrassBatch({ data, visible, vegetationRevision }: { data: TerrainData; visible: boolean; vegetationRevision: number }) {
   const mesh = useRef<THREE.InstancedMesh>(null);
-  const geometry = useMemo(() => new THREE.ConeGeometry(0.075, 0.58, 3), []);
+  const geometry = useMemo(() => { const shape = new THREE.ConeGeometry(0.075, 0.58, 3); shape.rotateX(Math.PI / 2); return shape; }, []);
   const material = useMemo(() => new THREE.MeshStandardMaterial({ color: "#528c4a", roughness: 1 }), []);
   useEffect(() => {
     const temp = new THREE.Object3D();
