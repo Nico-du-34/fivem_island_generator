@@ -314,7 +314,7 @@ export async function exportIslandPackage(settings: IslandSettings, data: Terrai
       label: material.label,
       diffuseTextureDictionary: material.diffuse,
       normalTextureDictionary: material.normal,
-      collisionMaterial: material.collision,
+      collisionMaterial: material.collisionMaterial,
       previewTint: material.tint,
       textureAssetsIncluded: false,
       fallbackMaps: [
