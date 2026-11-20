@@ -16,6 +16,8 @@ jobs:
           node-version: "20"
       - name: Install dependencies
         run: npm install
+      - name: Check local development launcher syntax
+        run: node --check scripts/run-local.mjs
       - name: Check Windows worker JavaScript syntax
         run: node --check native-worker/server.mjs
       - name: Check Blender worker Python syntax
