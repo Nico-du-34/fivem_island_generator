@@ -213,7 +213,7 @@ function SurfacePanel({
   );
 }
 
-type GtaDataKind = "objects" | "zones" | "ipls" | "interiors";
+type GtaDataKind = "objects" | "vehicles" | "peds" | "weapons" | "zones" | "ipls" | "interiors";
 
 function GtaDataBrowser({
   onAddAsset, onGoTo,
@@ -271,7 +271,7 @@ function GtaDataBrowser({
   };
 
   const title = (item: any) => {
-    if (kind === "objects") return item.name;
+    if (["objects", "vehicles", "peds", "weapons"].includes(kind)) return item.name;
     if (kind === "zones") return item.DisplayName || item.Name;
     return item.name || item.Name;
   };
@@ -281,6 +281,9 @@ function GtaDataBrowser({
       <div className="gta-data-tabs">
         {([
           ["objects", "Props"],
+          ["vehicles", "Véhicules"],
+          ["peds", "Peds"],
+          ["weapons", "Armes"],
           ["zones", "Zones"],
           ["ipls", "IPL"],
           ["interiors", "Intérieurs"],
@@ -292,7 +295,7 @@ function GtaDataBrowser({
         className="gta-data-search"
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        placeholder={kind === "objects" ? "Rechercher un prop (prop_...)" : "Rechercher un nom, une zone..."}
+        placeholder={kind === "objects" ? "Rechercher un prop (prop_...)" : "Rechercher un nom, un hash, une zone..."}
         aria-label="Rechercher dans les données GTA"
       />
       <div className="gta-data-meta">
@@ -310,8 +313,8 @@ function GtaDataBrowser({
                 <div className="gta-data-item">
                   <strong title={name}>{name}</strong>
                   <small>
-                    {kind === "objects"
-                      ? item.category + " · modèle GTA"
+                    {["objects", "vehicles", "peds", "weapons"].includes(kind)
+                      ? item.hash ? "Hash " + item.hash : "Nom d'archétype GTA"
                       : position ? position.x + ", " + position.y : item.DlcName || item.dlc || "Emplacement non défini"}
                   </small>
                 </div>
@@ -319,7 +322,9 @@ function GtaDataBrowser({
                   ? <button type="button" className="gta-data-action" onClick={() => onAddAsset(name)}>Ajouter</button>
                   : position
                     ? <button type="button" className="gta-data-action" onClick={() => onGoTo(position.x, position.y)}>Voir</button>
-                    : <span className="gta-data-empty">—</span>}
+                    : ["vehicles", "peds", "weapons"].includes(kind)
+                      ? <span className="gta-data-empty">Catalogue</span>
+                      : <span className="gta-data-empty">—</span>}
               </div>
             );
           })}
