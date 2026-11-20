@@ -18,6 +18,10 @@ jobs:
         run: npm install
       - name: Check local development launcher syntax
         run: node --check scripts/run-local.mjs
+      - name: Build native RAGE exporter
+        run: |
+          cmake -S native-engine -B build/native -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native --config Release --parallel 2
       - name: Check Windows worker JavaScript syntax
         run: node --check native-worker/server.mjs
       - name: Check Blender worker Python syntax
