@@ -371,11 +371,12 @@ void includeBounds(MapData& map, const Vec3& position, float radius) {
 
 void writeGrass(MapData& map, const Terrain& terrain, const std::vector<std::string>& grassTypes) {
     if (terrain.grass.empty() || grassTypes.empty()) return;
-    const float zMin = terrain.minZ; // overwritten below; kept for clarity in the batch box
-    (void)zMin;
+    const auto minMax = std::minmax_element(terrain.heights.begin(), terrain.heights.end());
+    const float minHeight = minMax.first == terrain.heights.end() ? -5.0f : *minMax.first;
+    const float maxHeight = minMax.second == terrain.heights.end() ? 5.0f : *minMax.second;
     GrassBatch batch;
-    batch.box_min = {-terrain.half, -terrain.half, -100.0f};
-    batch.box_max = {terrain.half, terrain.half, 900.0f};
+    batch.box_min = {terrain.originX - terrain.half, terrain.originY - terrain.half, minHeight - 2.0f};
+    batch.box_max = {terrain.originX + terrain.half, terrain.originY + terrain.half, maxHeight + 2.0f};
     batch.scale_range = {0.5f, 2.0f, 1.0f};
     batch.archetype = joaat_lower(grassTypes.front());
     batch.lod_dist = 250;
@@ -390,9 +391,9 @@ void writeGrass(MapData& map, const Terrain& terrain, const std::vector<std::str
         const float z = terrain.grass[i + 2];
         const float scale = terrain.grass[i + 3];
         GrassInstance instance;
-        instance.position[0] = static_cast<uint16_t>(std::clamp((x + terrain.half) / terrain.worldSize, 0.0f, 1.0f) * 65535.0f);
-        instance.position[1] = static_cast<uint16_t>(std::clamp((y + terrain.half) / terrain.worldSize, 0.0f, 1.0f) * 65535.0f);
-        instance.position[2] = static_cast<uint16_t>(std::clamp((z + 100.0f) / 1000.0f, 0.0f, 1.0f) * 65535.0f);
+        instance.position[0] = static_cast<uint16_t>(std::clamp((terrain.originX + x - batch.box_min.x) / (batch.box_max.x - batch.box_min.x), 0.0f, 1.0f) * 65535.0f);
+        instance.position[1] = static_cast<uint16_t>(std::clamp((terrain.originY + y - batch.box_min.y) / (batch.box_max.y - batch.box_min.y), 0.0f, 1.0f) * 65535.0f);
+        instance.position[2] = static_cast<uint16_t>(std::clamp((z - batch.box_min.z) / (batch.box_max.z - batch.box_min.z), 0.0f, 1.0f) * 65535.0f);
         instance.color[0] = 104;
         instance.color[1] = 132;
         instance.color[2] = 75;
