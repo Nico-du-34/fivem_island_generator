@@ -1,8 +1,10 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { connect } from "node:net";
-import { existsSync, readdirSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { mkdir, writeFile, rename } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const mode = process.argv[2] || "dev";
 const forwardedArgs = process.argv.slice(3);
@@ -15,11 +17,11 @@ const isLoopback = ["127.0.0.1", "::1", "localhost"].includes(workerHost);
 const isLocalBridge = bridgeUrl === localBase;
 
 if (!isLocalBridge && !process.env.ISLAND_EXPORT_BRIDGE_TOKEN) {
-  console.error("[Island Forge] Un worker distant nécessite ISLAND_EXPORT_BRIDGE_TOKEN. Pour le lancement local, retire ISLAND_EXPORT_BRIDGE_URL.");
+  console.error("[Island Forge] Un worker distant nécessite un token personnalisé. Pour le lancement local, retire ISLAND_EXPORT_BRIDGE_URL.");
   process.exit(1);
 }
 if (!isLoopback && (!process.env.ISLAND_EXPORT_BRIDGE_TOKEN || bridgeToken === localToken)) {
-  console.error("[Island Forge] Un worker réseau nécessite une adresse loopback interdite au défaut et un token personnalisé long.");
+  console.error("[Island Forge] Un worker réseau exige un token personnalisé ; le token local ne peut servir que sur loopback.");
   process.exit(1);
 }
 
@@ -33,65 +35,54 @@ const env = {
   ISLAND_WORKER_DATA: process.env.ISLAND_WORKER_DATA || join(root, ".islandforge", "jobs"),
 };
 
-function executableOnPath(command) {
-  try {
-    const lookup = process.platform === "win32" ? "where.exe" : "which";
-    const result = spawnSync(lookup, [command], { encoding: "utf8", windowsHide: true, timeout: 3000 });
-    const candidate = result.stdout?.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
-    return candidate && existsSync(candidate) ? candidate : null;
-  } catch {
-    return null;
+async function installNativeEngine() {
+  const configured = process.env.ISLAND_NATIVE_ENGINE;
+  if (configured && existsSync(configured)) {
+    env.ISLAND_NATIVE_ENGINE = configured;
+    console.log("[Island Forge] Moteur natif trouvé :", configured);
+    return true;
   }
-}
 
-function findBlender() {
-  const candidates = [];
-  if (env.BLENDER_PATH) candidates.push(env.BLENDER_PATH);
-  if (process.platform === "win32") {
-    const programFiles = process.env.ProgramFiles || "C:\\Program Files";
-    const local = process.env.LOCALAPPDATA || "";
-    for (const base of [join(programFiles, "Blender Foundation"), join(local, "Programs", "Blender Foundation")]) {
-      try {
-        for (const entry of readdirSync(base, { withFileTypes: true })) {
-          if (entry.isDirectory() && /^Blender\s+\d/i.test(entry.name)) {
-            candidates.push(join(base, entry.name, "blender.exe"));
-          }
-        }
-      } catch { /* Blender may be installed somewhere else. */ }
+  const executable = process.platform === "win32"
+    ? "island-forge-native-engine-win-x64.exe"
+    : "island-forge-native-engine";
+  const localPath = join(root, ".islandforge", "bin", executable);
+  if (existsSync(localPath)) {
+    env.ISLAND_NATIVE_ENGINE = localPath;
+    console.log("[Island Forge] Moteur natif local :", localPath);
+    return true;
+  }
+
+  if (process.platform !== "win32" || process.arch !== "x64") {
+    console.warn("[Island Forge] Le moteur d'export GTA natif est fourni pour Windows x64. L'éditeur et l'export source restent disponibles sur cette plateforme.");
+    return false;
+  }
+
+  const releaseUrl = "https://github.com/Nico-du-34/fivem_island_generator/releases/download/native-engine-v0.1.0/island-forge-native-engine-win-x64.exe";
+  console.log("[Island Forge] Vérification du moteur d'export GTA intégré…");
+  try {
+    const response = await fetch(releaseUrl, { signal: AbortSignal.timeout(45_000) });
+    if (!response.ok) {
+      console.warn("[Island Forge] Le binaire natif n'est pas encore publié (HTTP " + response.status + "). L'export source reste disponible.");
+      return false;
     }
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length < 256_000 || bytes[0] !== 0x4d || bytes[1] !== 0x5a) {
+      throw new Error("Le fichier téléchargé n'est pas un exécutable Windows valide.");
+    }
+    await mkdir(dirname(localPath), { recursive: true });
+    const temporaryPath = localPath + ".download";
+    await writeFile(temporaryPath, bytes);
+    await rename(temporaryPath, localPath);
+    env.ISLAND_NATIVE_ENGINE = localPath;
+    console.log("[Island Forge] Moteur natif installé automatiquement :", localPath);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[Island Forge] Téléchargement du moteur natif impossible : " + message);
+    console.warn("[Island Forge] Tu peux toujours générer et exporter les fichiers source OBJ/GLB.");
+    return false;
   }
-  candidates.push(executableOnPath(process.platform === "win32" ? "blender.exe" : "blender"));
-  return candidates.find((candidate) => candidate && existsSync(candidate)) || null;
-}
-
-function findSollumz(blenderPath) {
-  if (env.SOLLUMZ_ADDON_PATH && existsSync(env.SOLLUMZ_ADDON_PATH)) return env.SOLLUMZ_ADDON_PATH;
-  if (process.platform !== "win32") return null;
-  const appData = process.env.APPDATA;
-  if (!appData) return null;
-  const blenderRoot = join(appData, "Blender Foundation", "Blender");
-  let versions = [];
-  try {
-    versions = readdirSync(blenderRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && /^\d+\.\d+/.test(entry.name))
-      .map((entry) => entry.name);
-  } catch {
-    return null;
-  }
-  const blenderVersion = blenderPath
-    ? spawnSync(blenderPath, ["--version"], { encoding: "utf8", windowsHide: true, timeout: 5000 }).stdout?.match(/Blender\s+(\d+\.\d+)/)?.[1]
-    : null;
-  versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-  if (blenderVersion) versions.sort((a, b) => Number(b.startsWith(blenderVersion)) - Number(a.startsWith(blenderVersion)));
-  for (const version of versions) {
-    const addons = join(blenderRoot, version, "scripts", "addons");
-    try {
-      const entries = readdirSync(addons, { withFileTypes: true });
-      const addon = entries.find((entry) => entry.isDirectory() && entry.name.toLowerCase().includes("sollumz"));
-      if (addon) return join(addons, addon.name);
-    } catch { /* Try the next Blender profile. */ }
-  }
-  return null;
 }
 
 function portIsOpen(port) {
@@ -133,23 +124,11 @@ process.on("SIGINT", () => stop(130));
 process.on("SIGTERM", () => stop(143));
 
 if (startLocalWorker) {
+  if (workerHost === "127.0.0.1" || workerHost === "::1" || workerHost === "localhost") {
+    await installNativeEngine();
+  }
   const port = Number(env.ISLAND_WORKER_PORT);
   if (!(await portIsOpen(port))) {
-    const blender = findBlender();
-    if (blender) {
-      env.BLENDER_PATH = blender;
-      const addon = findSollumz(blender);
-      if (addon) {
-        env.SOLLUMZ_ADDON_PATH = addon;
-        env.SOLLUMZ_ADDON_MODULE = env.SOLLUMZ_ADDON_MODULE || basename(addon);
-      }
-      console.log("[Island Forge] Blender détecté :", blender);
-      if (addon) console.log("[Island Forge] Sollumz détecté :", addon);
-      else console.log("[Island Forge] Sollumz non détecté automatiquement ; vérifie son installation dans Blender.");
-    } else {
-      console.warn("[Island Forge] Blender non détecté. L'éditeur et l'export source fonctionneront ; l'export GTA natif demandera Blender + Sollumz.");
-    }
-
     const workerEntry = join(root, "native-worker", "server.mjs");
     worker = spawn(process.execPath, [workerEntry], {
       cwd: root,
@@ -165,7 +144,7 @@ if (startLocalWorker) {
     if (!(await waitForPort(port))) {
       console.warn("[Island Forge] Le worker ne répond pas encore. L'éditeur reste disponible.");
     } else {
-      console.log("[Island Forge] Worker d'export local prêt sur", localBase);
+      console.log("[Island Forge] Worker local prêt sur", localBase);
     }
   } else {
     console.log("[Island Forge] Worker local déjà démarré sur", localBase);
@@ -179,21 +158,22 @@ if (mode === "worker") {
     await new Promise((resolvePromise) => worker.once("exit", resolvePromise));
   }
 } else {
-const nextCli = join(root, "node_modules", "next", "dist", "bin", "next");
-if (!existsSync(nextCli)) {
-  console.error("[Island Forge] Next.js est introuvable. Lance npm install depuis la racine du projet.");
-  stop(1);
-}
-const webMode = mode === "start" ? "start" : "dev";
-web = spawn(process.execPath, [nextCli, webMode, ...forwardedArgs], {
-  cwd: root,
-  env,
-  stdio: "inherit",
-  windowsHide: true,
-});
-web.once("error", (error) => {
-  console.error("[Island Forge] Impossible de démarrer Next.js :", error.message);
-  stop(1);
-});
-web.once("exit", (code, signal) => stop(code ?? (signal ? 1 : 0)));
+  const nextCli = join(root, "node_modules", "next", "dist", "bin", "next");
+  if (!existsSync(nextCli)) {
+    console.error("[Island Forge] Next.js est introuvable. Lance npm install depuis la racine du projet.");
+    stop(1);
+  } else {
+    const webMode = mode === "start" ? "start" : "dev";
+    web = spawn(process.execPath, [nextCli, webMode, ...forwardedArgs], {
+      cwd: root,
+      env,
+      stdio: "inherit",
+      windowsHide: true,
+    });
+    web.once("error", (error) => {
+      console.error("[Island Forge] Impossible de démarrer Next.js :", error.message);
+      stop(1);
+    });
+    web.once("exit", (code, signal) => stop(code ?? (signal ? 1 : 0)));
+  }
 }
