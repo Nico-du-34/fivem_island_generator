@@ -50,63 +50,61 @@ The ZIP now contains:
 
 The source ZIP is **not a finished FiveM map**. OBJ, GLB, RAW and fallback PNGs are not native GTA V RAGE assets.
 
-### Native FiveM package (Windows worker + PyMateria)
+### Native FiveM package (worker local + PyMateria)
 
-The repository includes a Windows worker in [native-worker/](native-worker/). It receives export jobs through the authenticated Next.js proxy, runs Blender in background mode and exports the map using the native PyMateria backend used by Sollumz/szio.
+Le worker Windows est intégré au démarrage de l'application. Il reçoit les exports depuis Next.js, lance Blender en tâche de fond et utilise Sollumz/szio + PyMateria pour générer les ressources GTA natives :
 
-It generates:
-- Native **YDR** terrain drawables.
-- Native **YBN** coarse BVH collisions.
-- Native **YTYP** archetypes.
-- Native **YTD** texture dictionaries.
-- Native **YMAP** RSC7 map resources, with tile placements and HD/LOD/SLOD hierarchy.
-- Optional CodeWalker XML source copies under sources/cwxml/.
-- A FiveM resource scaffold, material manifests, water/vegetation metadata and reports.
+- **YDR** terrain visible, découpé en tuiles.
+- **YBN** collisions BVH.
+- **YTYP** archetypes.
+- **YTD** dictionnaires de textures.
+- **YMAP** natif RSC7, avec les placements et la hiérarchie HD/LOD/SLOD.
+- Sources CodeWalker XML facultatives, rapports et manifests.
 
-**No manual YMAP conversion is required.** The worker exports AssetMapData using the szio/PyMateria native provider, then reopens each generated YMAP with szio's reader. The export fails if a YMAP cannot be reopened or contains no entities. The szio project contains a native YMAP round-trip test:
-- https://github.com/Sollumz/szio/blob/main/tests/test_maps.py
-- https://github.com/Sollumz/szio/blob/main/src/szio/gta5/native/provider.py
+Le worker relit chaque YMAP avec szio et refuse de marquer l'export prêt si le fichier est illisible ou vide. CodeWalker reste disponible pour inspecter la carte, mais n'est pas requis pour convertir le YMAP.
 
-CodeWalker is optional for inspecting/editing the generated map. It is not used as a separate conversion stage.
+### Démarrage automatique — aucun fichier .env
 
-#### Install and run the worker
+Sur Windows 10/11 :
 
-Requirements: Windows 10/11 x64, Node.js 20+, Blender 4.0+ (4.5 recommended), Sollumz 2.9.1+ and PyMateria for native Gen8/Gen9 exports.
+1. Installe Node.js 20+, Blender 4.5+, Sollumz et PyMateria dans ton profil Blender.
+2. Dans le dossier du projet, lance simplement :
 
-1. Install Sollumz and PyMateria in the same Blender profile used by the worker.
-2. Open PowerShell in native-worker/ and configure the environment variables described in [native-worker/README.md](native-worker/README.md).
-3. Start the worker with start-worker.ps1.
-4. Configure the web app .env:
-
-~~~dotenv
-ISLAND_EXPORT_BRIDGE_URL=http://WINDOWS_WORKER_LAN_IP:8787
-ISLAND_EXPORT_BRIDGE_TOKEN=the-same-long-random-secret
+~~~powershell
+npm install
+npm run dev
 ~~~
 
-Keep the worker behind a LAN/VPN/firewall. The HTTP service refuses to start without a bearer token. It runs one Blender conversion at a time and stores temporary jobs under ISLAND_WORKER_DATA.
+3. Ouvre http://localhost:3000.
 
-#### Textures
+npm run dev lance automatiquement Next.js **et** le worker local. Il cherche Blender dans les emplacements Windows habituels ou dans le PATH, puis détecte Sollumz dans les profils Blender installés. Le worker écoute uniquement sur 127.0.0.1, sans fichier .env, sans token à saisir et sans second terminal.
 
-The supplied GunWare source files contained GTA texture dictionary names, not the original diffuse/normal bitmaps. If you have legally available diffuse/normal replacement images, put them in GUNWARE_TEXTURE_DIR using <material-id>_diffuse.png and <material-id>_normal.png filenames. Otherwise the worker creates procedural fallback maps, packs them into YTD and uses them for YDR materials. These are fallback textures, not original GunWare/GTA bitmaps.
+Après une compilation, npm start lance aussi les deux services. Pour démarrer uniquement le worker, utilise npm run worker ou native-worker/start-worker.ps1.
 
-#### Current limitations
+**À savoir :** si Blender ou Sollumz n'est pas installé, l'éditeur 3D, la génération et l'export source OBJ/GLB restent disponibles. L'export RAGE natif affichera une erreur explicite au lieu de prétendre avoir créé une ressource FiveM.
 
-- Native GTA water quads are not produced yet; water settings are included as metadata.
-- Grass placement data is retained, but a native YMAP grass instance list is not created yet.
-- Trees and rocks use built-in GTA model names; verify those archetypes exist in the target game build/custom asset pack.
-- Final inspection in CodeWalker and testing on a clean FiveM server are still recommended.
+### Textures GunWare
+
+Les sources GunWare fournies contenaient les noms des dictionnaires de textures GTA, pas les bitmaps diffuse/normal originaux. Island Forge utilise donc des textures de secours procédurales si aucun bitmap de remplacement n'est présent. Tu peux déposer tes images de remplacement dans le dossier de textures local du worker ; elles ne sont jamais présentées comme les textures originales.
+
+### Limites restantes
+
+- Les water quads GTA natifs ne sont pas encore produits ; leurs paramètres sont exportés en métadonnées.
+- Les placements d'herbe sont conservés, mais les YMAP grass instance lists natives restent à implémenter.
+- Les arbres et rochers référencent des archétypes GTA existants, à vérifier sur le build cible.
+- Une inspection CodeWalker et un test sur un serveur FiveM propre restent recommandés avant déploiement.
 
 
 ## Run locally
 
-Requirements: Node.js 20+.
+Requirements: Node.js 20+, Blender 4.5+, Sollumz and PyMateria for native GTA exports.
 
-```bash
+~~~bash
 npm install
 npm run dev
-```
+~~~
 
-Open http://localhost:3000.
+Open http://localhost:3000. Next.js and the local export worker are started together; no .env file is needed.
 
 ## Type check and production build
 
@@ -118,7 +116,7 @@ npm start
 
 ## Deploy
 
-Deploy as a standard Next.js Node.js application. Procedural generation, the 3D viewport and the source ZIP export run in the browser. Native export needs the separate Windows worker. Keep the worker on a private network and configure a long random token.
+For local development and local production startup, use the included runner (npm run dev / npm start) so the worker starts alongside Next.js. On a separate remote deployment, keep the worker on a private network and override the bridge URL/token through the deployment environment; this is optional and not needed for local use.
 
 ## Coordinate notes
 
