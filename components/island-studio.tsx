@@ -455,10 +455,19 @@ export default function IslandStudio() {
   };
 
   const encodeTerrainEdits = async (data: TerrainData) => {
-    const packed = new Float32Array(data.heights.length + data.blendWeights.length + data.vegetationMask.length);
-    packed.set(data.heights, 0);
-    packed.set(data.blendWeights, data.heights.length);
-    packed.set(data.vegetationMask, data.heights.length + data.blendWeights.length);
+    const counts = {
+      heights: data.heights.length,
+      blendWeights: data.blendWeights.length,
+      vegetationMask: data.vegetationMask.length,
+      props: data.props.length,
+      grass: data.grass.length,
+    };
+    const packed = new Float32Array(Object.values(counts).reduce((total, count) => total + count, 0));
+    let offset = 0;
+    for (const array of [data.heights, data.blendWeights, data.vegetationMask, data.props, data.grass]) {
+      packed.set(array, offset);
+      offset += array.length;
+    }
     const raw = new Uint8Array(packed.buffer);
     let bytes = raw;
     if ("CompressionStream" in window) {
@@ -466,15 +475,20 @@ export default function IslandStudio() {
       bytes = new Uint8Array(await new Response(compressed).arrayBuffer());
     }
     let binary = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, Math.min(bytes.length, i + 0x8000)));
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, Math.min(bytes.length, i + 0x8000)));
+    }
     return {
       format: "float32-le",
       compression: bytes === raw ? "none" : "gzip",
       n: data.n,
       cell: data.cell,
-      heightsCount: data.heights.length,
-      blendCount: data.blendWeights.length,
-      vegetationCount: data.vegetationMask.length,
+      counts,
+      heightsCount: counts.heights,
+      blendCount: counts.blendWeights,
+      vegetationCount: counts.vegetationMask,
+      propsCount: counts.props,
+      grassCount: counts.grass,
       data: btoa(binary),
     };
   };
@@ -492,7 +506,47 @@ export default function IslandStudio() {
           params: generatedSettings,
           gen: gameGen,
           edits: await encodeTerrainEdits(terrain),
-          options: { xml, waves: generatedSettings.waves },
+          options: {
+            xml,
+            waves: generatedSettings.waves,
+            target: gameGen === 9 ? "enhanced" : "legacy",
+            createVisualYdr: true,
+            createCollisionYbn: true,
+            createYmapAndYtyp: true,
+            createYtd: true,
+            createLods: true,
+          },
+          materials: GUNWARE_MATERIALS_BY_ROLE.map((items, role) => {
+            const selected = items.find((material) => material.id === generatedSettings.layers[role]) ?? items[0];
+            return {
+              slot: role,
+              id: selected.id,
+              label: selected.label,
+              diffuseTextureDictionary: selected.diffuse,
+              normalTextureDictionary: selected.normal,
+              collisionMaterial: selected.collision,
+              previewTint: selected.tint,
+            };
+          }),
+          terrain: {
+            axis: "Z_UP",
+            units: "meters",
+            resolution: terrain.n,
+            cellSize: terrain.cell,
+            worldSize: generatedSettings.worldSize,
+            landRatio: terrain.landRatio,
+            minHeight: terrain.minHeight,
+            maxHeight: terrain.maxHeight,
+            origin: { x: generatedSettings.originX, y: generatedSettings.originY, z: 0 },
+            bounds: {
+              minX: generatedSettings.originX - generatedSettings.worldSize / 2,
+              maxX: generatedSettings.originX + generatedSettings.worldSize / 2,
+              minY: generatedSettings.originY - generatedSettings.worldSize / 2,
+              maxY: generatedSettings.originY + generatedSettings.worldSize / 2,
+              minZ: terrain.minHeight,
+              maxZ: terrain.maxHeight,
+            },
+          },
           preview: null,
         }),
       });
