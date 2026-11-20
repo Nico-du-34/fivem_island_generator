@@ -993,6 +993,7 @@ export default function IslandStudio() {
             </>
           )}
         </main>
+      </div>
       <footer className="statusbar">
         <span className="status-indicator" />
         <span>{notice}</span>
