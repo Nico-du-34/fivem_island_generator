@@ -13,8 +13,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 
   try {
-    const upstream = await fetch(\`${base}/api/export/jobs/${encodeURIComponent(id)}/file\`, {
-      headers: { authorization: \`Bearer ${token}\` },
+    const upstream = await fetch(`${base}/api/export/jobs/${encodeURIComponent(id)}/file`, {
+      headers: { authorization: `Bearer ${token}` },
       cache: "no-store",
       signal: AbortSignal.timeout(60_000),
     });
