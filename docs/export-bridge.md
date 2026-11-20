@@ -22,7 +22,7 @@ POST /api/export/jobs
 
 The Next.js proxy forwards the JSON body to:
 
-POST {ISLAND_EXPORT_BRIDGE_URL}/api/export/jobs
+POST http://127.0.0.1:8787/api/export/jobs
 
 Example body (abbreviated):
 
@@ -96,7 +96,7 @@ The edits binary is base64-encoded. Decode it, decompress gzip when compression 
 
 The counts object is authoritative for array boundaries. Validate the exact total byte size before allocating geometry. The legacy heightsCount, blendCount, vegetationCount, propsCount and grassCount fields are also included for compatibility.
 
-The materials array is ordered by terrain slot. diffuseTextureDictionary and normalTextureDictionary are **texture names**, not image bytes. The web source ZIP includes procedural fallback PNG maps for Blender preview, but these must not be mislabelled as original GunWare/GTA textures. To build native YTD dictionaries, the Windows worker must resolve the named game textures from the matching legally available game archives (RPF), or use an explicitly supplied replacement texture set, then convert/package the required DDS images with mipmaps.
+The materials array is ordered by terrain slot. diffuseTextureDictionary and normalTextureDictionary are **texture names**, not image bytes. The web source ZIP includes procedural fallback PNG maps for Blender preview, but these must not be mislabelled as original GunWare/GTA textures. The Windows worker reads replacement images from native-worker/textures using <material-id>_diffuse.png and <material-id>_normal.png. If no replacement images exist, it creates procedural fallback maps for the YTD. The supplied GunWare source files did not include original bitmap data.
 
 Successful response:
 
