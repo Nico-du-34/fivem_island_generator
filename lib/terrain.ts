@@ -199,13 +199,6 @@ function createSimplexNoise(seed: number) {
     const x1 = x0 - i1 + g2, y1 = y0 - j1 + g2;
     const x2 = x0 - 1 + 2 * g2, y2 = y0 - 1 + 2 * g2;
     const ii = i & 255, jj = j & 255;
-    const contribution = (cx: number, cy: number, index: number) => {
-      let attenuation = 0.5 - cx * cx - cy * cy;
-      if (attenuation <= 0) return 0;
-      const gradient = gradients[permutation[ii + index + permutation[jj + (index === 0 ? 0 : index === 1 ? j1 : 1)]] % 12];
-      attenuation *= attenuation;
-      return attenuation * attenuation * (gradient[0] * cx + gradient[1] * cy);
-    };
     // The three simplex corners use the same permutation table with their own offsets.
     const p0 = gradients[permutation[ii + permutation[jj]] % 12];
     const p1 = gradients[permutation[ii + i1 + permutation[jj + j1]] % 12];
@@ -541,7 +534,7 @@ export function generateIsland(p: IslandSettings): TerrainData {
 
   const heightScale = p.maxHeight / Math.max(0.001, rawPeak);
   for (let i = 0; i < count; i++) {
-    if (land[i] > 0.5) heights[i] *= heightScale;
+    if (heights[i] > 0) heights[i] *= heightScale;
   }
 
   // Erosion is applied to the normalized height field, not to the raw noise.
