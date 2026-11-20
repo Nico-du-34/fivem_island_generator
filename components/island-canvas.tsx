@@ -203,30 +203,67 @@ function TerrainMesh({
         varying vec3 vNormal;
         varying vec3 vWorldPosition;
         varying float vHeight;
-        void main() {
-          vec3 sand = uLayer0;
-          vec3 grass = uLayer1;
-          vec3 rock = uLayer2;
-          vec3 dirt = uLayer3;
-          vec3 color;
-          if (uViewMode > 0.5 && uViewMode < 1.5) {
-            float h = clamp(vHeight / uMaxHeight, 0.0, 1.0);
-            color = mix(vec3(0.07,0.20,0.34), vec3(0.33,0.53,0.32), smoothstep(0.0,0.46,h));
-            color = mix(color, vec3(0.73,0.72,0.65), smoothstep(0.58,0.9,h));
-          } else {
-            vec4 weights = max(vWeights, vec4(0.0));
-            float total = max(dot(weights, vec4(1.0)), 0.0001);
-            weights /= total;
-            color = sand * weights.r + grass * weights.g + rock * weights.b + dirt * weights.a;
-            float detail = sin(vWorldPosition.x * 0.075) * sin(vWorldPosition.y * 0.069) * 0.025;
-            if (uViewMode < 1.5) color *= 0.97 + detail;
+
+        float hash21(vec2 p) {
+          p = fract(p * vec2(123.34, 456.21));
+          p += dot(p, p + 45.32);
+          return fract(p.x * p.y);
+        }
+        float noise2(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          float a = hash21(i);
+          float b = hash21(i + vec2(1.0, 0.0));
+          float c = hash21(i + vec2(0.0, 1.0));
+          float d = hash21(i + vec2(1.0, 1.0));
+          return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+        }
+        float fbm(vec2 p) {
+          float value = 0.0;
+          float amplitude = 0.5;
+          for (int i = 0; i < 5; i++) {
+            value += noise2(p) * amplitude;
+            p *= 2.03;
+            amplitude *= 0.5;
           }
+          return value;
+        }
+        void main() {
+          vec4 weights = max(vWeights, vec4(0.0));
+          weights /= max(dot(weights, vec4(1.0)), 0.0001);
+          vec2 uv = vWorldPosition.xy / max(uTexScale, 1.0);
+          float fine = fbm(uv * 1.65);
+          float broad = fbm(uv * 0.34);
+          float grain = noise2(uv * 13.0);
+          float ridge = 1.0 - abs(noise2(uv * 2.8) * 2.0 - 1.0);
+
+          vec3 sand = uLayer0 * (0.88 + fine * 0.18 + grain * 0.08);
+          vec3 grass = uLayer1 * (0.72 + broad * 0.28 + fine * 0.12);
+          vec3 rock = uLayer2 * (0.78 + ridge * 0.34 + fine * 0.07);
+          vec3 dirt = uLayer3 * (0.78 + broad * 0.18 + grain * 0.10);
+          vec3 color = sand * weights.r + grass * weights.g + rock * weights.b + dirt * weights.a;
+
+          if (uViewMode > 0.5 && uViewMode < 1.5) {
+            float h = clamp(vHeight / uMaxHeight, -0.25, 1.0);
+            color = mix(vec3(0.055, 0.15, 0.22), vec3(0.25, 0.43, 0.26), smoothstep(0.0, 0.55, h));
+            color = mix(color, vec3(0.72, 0.70, 0.63), smoothstep(0.62, 0.94, h));
+          } else if (uViewMode > 1.5) {
+            color = vec3(weights.r, weights.g, weights.b);
+          }
+
+          vec3 normal = normalize(vNormal);
           vec3 lightDirection = normalize(vec3(-0.42, -0.48, 0.77));
-          float diffuse = 0.58 + 0.42 * max(dot(normalize(vNormal), lightDirection), 0.0);
-          color *= diffuse;
+          float slopeShade = 0.80 + 0.20 * max(normal.z, 0.0);
+          float diffuse = 0.66 + 0.34 * max(dot(normal, lightDirection), 0.0);
+          float microShade = 0.97 + (noise2(uv * 3.0) - 0.5) * 0.08;
+          color *= diffuse * slopeShade * microShade;
           gl_FragColor = vec4(color, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
         }
       `,
+
       side: THREE.DoubleSide,
       toneMapped: true,
     });
