@@ -50,47 +50,51 @@ The ZIP now contains:
 
 The source ZIP is **not a finished FiveM map**. OBJ, GLB, RAW and fallback PNGs are not native GTA V RAGE assets.
 
-### Native FiveM package (requires the Windows worker)
+### Native FiveM package (Windows worker + PyMateria)
 
-The repository now includes a separate worker in [native-worker/](native-worker/). It receives export jobs through the authenticated Next.js proxy, starts Blender in background mode, builds terrain tiles and collisions with Sollumz, and packages the result.
+The repository includes a Windows worker in [native-worker/](native-worker/). It receives export jobs through the authenticated Next.js proxy, runs Blender in background mode and exports the map using the native PyMateria backend used by Sollumz/szio.
 
-It currently generates:
+It generates:
 - Native **YDR** terrain drawables.
 - Native **YBN** coarse BVH collisions.
 - Native **YTYP** archetypes.
-- Native **YTD** texture dictionary.
-- A **YMAP CodeWalker XML** containing tile placements, LOD/SLOD hierarchy and configured tree/rock model placements.
-- A FiveM resource scaffold, material manifests, water/vegetation metadata and an export report.
+- Native **YTD** texture dictionaries.
+- Native **YMAP** RSC7 map resources, with tile placements and HD/LOD/SLOD hierarchy.
+- Optional CodeWalker XML source copies under sources/cwxml/.
+- A FiveM resource scaffold, material manifests, water/vegetation metadata and reports.
 
-**YMAP caveat:** current Sollumz exports YMAP through CodeWalker XML, not as a native binary YMAP. The worker ZIP is therefore marked **nativeReady: false**. Open the XML in CodeWalker, save it as binary .ymap, then run the included finalize-ymap.ps1 from the resource root. Do not start the resource as a complete map before this step.
+**No manual YMAP conversion is required.** The worker exports AssetMapData using the szio/PyMateria native provider, then reopens each generated YMAP with szio's reader. The export fails if a YMAP cannot be reopened or contains no entities. The szio project contains a native YMAP round-trip test:
+- https://github.com/Sollumz/szio/blob/main/tests/test_maps.py
+- https://github.com/Sollumz/szio/blob/main/src/szio/gta5/native/provider.py
+
+CodeWalker is optional for inspecting/editing the generated map. It is not used as a separate conversion stage.
 
 #### Install and run the worker
 
-Requirements: Windows 10/11 x64, Node.js 20+, Blender 4.0+ (4.5 recommended), Sollumz 2.9.1+ and PyMateria for native Gen8/Gen9 exports, plus CodeWalker for final YMAP conversion.
+Requirements: Windows 10/11 x64, Node.js 20+, Blender 4.0+ (4.5 recommended), Sollumz 2.9.1+ and PyMateria for native Gen8/Gen9 exports.
 
 1. Install Sollumz and PyMateria in the same Blender profile used by the worker.
 2. Open PowerShell in native-worker/ and configure the environment variables described in [native-worker/README.md](native-worker/README.md).
 3. Start the worker with start-worker.ps1.
-4. Configure the web app's .env:
+4. Configure the web app .env:
 
-```dotenv
+~~~dotenv
 ISLAND_EXPORT_BRIDGE_URL=http://WINDOWS_WORKER_LAN_IP:8787
 ISLAND_EXPORT_BRIDGE_TOKEN=the-same-long-random-secret
-```
+~~~
 
 Keep the worker behind a LAN/VPN/firewall. The HTTP service refuses to start without a bearer token. It runs one Blender conversion at a time and stores temporary jobs under ISLAND_WORKER_DATA.
 
 #### Textures
 
-The supplied GunWare source files contained GTA texture dictionary names, not the original diffuse/normal bitmaps. If you have legally available diffuse/normal replacement images, put them in GUNWARE_TEXTURE_DIR using <material-id>_diffuse.png and <material-id>_normal.png filenames. Otherwise the worker creates procedural fallback maps, packs them into YTD and uses them for the YDR materials. These are fallback textures, not original GunWare/GTA bitmaps.
+The supplied GunWare source files contained GTA texture dictionary names, not the original diffuse/normal bitmaps. If you have legally available diffuse/normal replacement images, put them in GUNWARE_TEXTURE_DIR using <material-id>_diffuse.png and <material-id>_normal.png filenames. Otherwise the worker creates procedural fallback maps, packs them into YTD and uses them for YDR materials. These are fallback textures, not original GunWare/GTA bitmaps.
 
 #### Current limitations
 
-- YMAP binary conversion remains a manual CodeWalker step.
 - Native GTA water quads are not produced yet; water settings are included as metadata.
-- Grass placement data is retained, but a native YMAP grass batch is not created yet.
+- Grass placement data is retained, but a native YMAP grass instance list is not created yet.
 - Trees and rocks use built-in GTA model names; verify those archetypes exist in the target game build/custom asset pack.
-- Final validation in CodeWalker and on a clean FiveM server is still required.
+- Final inspection in CodeWalker and testing on a clean FiveM server are still recommended.
 
 
 ## Run locally
