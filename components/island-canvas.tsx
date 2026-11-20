@@ -155,26 +155,80 @@ function TerrainMesh({
     return result;
   }, [data]);
 
+  const surfaceTextures = useMemo(() => {
+    const definitions: Record<MaterialLayer, { diffuse: string; normal: string; fallback: string }> = {
+      sand_beach: { diffuse: "cs_islx_bchsand_5", normal: "cs_islx_bchsand_5_n", fallback: "#d9c9a3" },
+      grass_lush: { diffuse: "cs_rsn_sl_wetlandsgrass2", normal: "cs_rsn_sl_wetlandsgrass2_n", fallback: "#5d7134" },
+      rock_cliff: { diffuse: "cs_islx_cstcliff_0001b", normal: "cs_rsn_sl_cstcliff_0001_n", fallback: "#7d7466" },
+      dirt_forest: { diffuse: "cs_rsn_dor_mntearthstonesveg02", normal: "cs_rsn_dor_mntearthstonesveg02_n", fallback: "#6e5f45" },
+    };
+    const loader = new THREE.TextureLoader();
+    const makeFallback = (color: string, srgb: boolean) => {
+      const value = new THREE.Color(color);
+      const pixels = new Uint8Array([Math.round(value.r * 255), Math.round(value.g * 255), Math.round(value.b * 255), 255]);
+      const texture = new THREE.DataTexture(pixels, 1, 1, THREE.RGBAFormat);
+      texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.magFilter = THREE.LinearFilter;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.generateMipmaps = true;
+      texture.needsUpdate = true;
+      return texture;
+    };
+    const loadInto = (target: THREE.Texture, path: string) => {
+      loader.load(path, (loaded) => {
+        target.image = loaded.image;
+        target.needsUpdate = true;
+        loaded.dispose();
+      }, undefined, () => {
+        // Keep the palette fallback if the GunWare texture bank is unavailable.
+      });
+    };
+    return settings.layers.map((layer) => {
+      const definition = definitions[layer];
+      const diffuse = makeFallback(definition.fallback, true);
+      const normal = makeFallback("#8080ff", false);
+      diffuse.anisotropy = 8;
+      normal.anisotropy = 8;
+      loadInto(diffuse, `/api/textures/terrain/${definition.diffuse}.png`);
+      loadInto(normal, `/api/textures/terrain/${definition.normal}.png`);
+      return { diffuse, normal };
+    });
+  }, [settings.layers]);
+
+  useEffect(() => () => {
+    surfaceTextures.forEach(({ diffuse, normal }) => {
+      diffuse.dispose();
+      normal.dispose();
+    });
+  }, [surfaceTextures]);
+
   const material = useMemo(() => {
     if (viewMode === "wireframe") {
-      return new THREE.MeshBasicMaterial({ color: "#8996b9", wireframe: true, transparent: true, opacity: 0.62 });
+      return new THREE.MeshBasicMaterial({ color: "#a7b0c8", wireframe: true, transparent: true, opacity: 0.7 });
     }
     const mode = viewMode === "height" ? 1 : viewMode === "material" ? 2 : 0;
     const palette: Record<MaterialLayer, string> = {
-      sand_beach: "#c8b17d",
-      grass_lush: "#3f713c",
-      rock_cliff: "#77766e",
-      dirt_forest: "#795d42",
+      sand_beach: "#d9c9a3",
+      grass_lush: "#5d7134",
+      rock_cliff: "#7d7466",
+      dirt_forest: "#6e5f45",
     };
     const layerColors = settings.layers.map((layer) => new THREE.Color(palette[layer] ?? "#777777"));
+    const textureUniforms = Object.fromEntries(surfaceTextures.flatMap(({ diffuse, normal }, index) => [
+      [`uDiffuse${index}`, { value: diffuse }],
+      [`uNormal${index}`, { value: normal }],
+    ]));
     return new THREE.ShaderMaterial({
       uniforms: {
         uMaxHeight: { value: Math.max(1, data.maxHeight) },
         uViewMode: { value: mode },
-        uLayer0: { value: layerColors[0] ?? new THREE.Color("#c8b17d") },
-        uLayer1: { value: layerColors[1] ?? new THREE.Color("#3f713c") },
-        uLayer2: { value: layerColors[2] ?? new THREE.Color("#77766e") },
-        uLayer3: { value: layerColors[3] ?? new THREE.Color("#795d42") },
+        uLayer0: { value: layerColors[0] ?? new THREE.Color("#d9c9a3") },
+        uLayer1: { value: layerColors[1] ?? new THREE.Color("#5d7134") },
+        uLayer2: { value: layerColors[2] ?? new THREE.Color("#7d7466") },
+        uLayer3: { value: layerColors[3] ?? new THREE.Color("#6e5f45") },
+        uTextureScale: { value: Math.max(1.5, settings.texScale) },
+        ...textureUniforms,
       },
       vertexShader: `
         attribute vec4 blendWeights;
@@ -195,42 +249,66 @@ function TerrainMesh({
         precision highp float;
         uniform float uMaxHeight;
         uniform float uViewMode;
+        uniform float uTextureScale;
         uniform vec3 uLayer0;
         uniform vec3 uLayer1;
         uniform vec3 uLayer2;
         uniform vec3 uLayer3;
+        uniform sampler2D uDiffuse0;
+        uniform sampler2D uDiffuse1;
+        uniform sampler2D uDiffuse2;
+        uniform sampler2D uDiffuse3;
+        uniform sampler2D uNormal0;
+        uniform sampler2D uNormal1;
+        uniform sampler2D uNormal2;
+        uniform sampler2D uNormal3;
         varying vec4 vWeights;
         varying vec3 vNormal;
         varying vec3 vWorldPosition;
         varying float vHeight;
         void main() {
-          vec3 sand = uLayer0;
-          vec3 grass = uLayer1;
-          vec3 rock = uLayer2;
-          vec3 dirt = uLayer3;
           vec3 color;
+          vec3 surfaceNormal = normalize(vNormal);
           if (uViewMode > 0.5 && uViewMode < 1.5) {
             float h = clamp(vHeight / uMaxHeight, 0.0, 1.0);
-            color = mix(vec3(0.07,0.20,0.34), vec3(0.33,0.53,0.32), smoothstep(0.0,0.46,h));
-            color = mix(color, vec3(0.73,0.72,0.65), smoothstep(0.58,0.9,h));
-          } else {
+            color = mix(vec3(0.035,0.15,0.22), vec3(0.28,0.43,0.24), smoothstep(0.0,0.38,h));
+            color = mix(color, vec3(0.66,0.62,0.53), smoothstep(0.52,0.88,h));
+            color *= 0.82 + 0.18 * max(surfaceNormal.z, 0.0);
+          } else if (uViewMode > 1.5) {
             vec4 weights = max(vWeights, vec4(0.0));
-            float total = max(dot(weights, vec4(1.0)), 0.0001);
-            weights /= total;
-            color = sand * weights.r + grass * weights.g + rock * weights.b + dirt * weights.a;
-            float detail = sin(vWorldPosition.x * 0.075) * sin(vWorldPosition.y * 0.069) * 0.025;
-            if (uViewMode < 1.5) color *= 0.97 + detail;
+            weights /= max(dot(weights, vec4(1.0)), 0.0001);
+            color = vec3(weights.r * 0.95 + weights.g * 0.05, weights.g * 0.90 + weights.a * 0.08, weights.b * 0.92 + weights.a * 0.08);
+          } else {
+            vec2 uv = vWorldPosition.xy / max(uTextureScale, 0.25);
+            vec4 weights = max(vWeights, vec4(0.0));
+            weights /= max(dot(weights, vec4(1.0)), 0.0001);
+            vec3 sand = texture2D(uDiffuse0, uv).rgb;
+            vec3 grass = texture2D(uDiffuse1, uv).rgb;
+            vec3 rock = texture2D(uDiffuse2, uv).rgb;
+            vec3 dirt = texture2D(uDiffuse3, uv).rgb;
+            vec3 fallback = uLayer0 * weights.r + uLayer1 * weights.g + uLayer2 * weights.b + uLayer3 * weights.a;
+            color = mix(fallback, sand * weights.r + grass * weights.g + rock * weights.b + dirt * weights.a, 0.92);
+            vec3 n0 = texture2D(uNormal0, uv).xyz * 2.0 - 1.0;
+            vec3 n1 = texture2D(uNormal1, uv).xyz * 2.0 - 1.0;
+            vec3 n2 = texture2D(uNormal2, uv).xyz * 2.0 - 1.0;
+            vec3 n3 = texture2D(uNormal3, uv).xyz * 2.0 - 1.0;
+            vec3 tangentNormal = normalize(n0 * weights.r + n1 * weights.g + n2 * weights.b + n3 * weights.a);
+            vec3 tangent = normalize(vec3(1.0, 0.0, 0.0) - surfaceNormal * surfaceNormal.x);
+            vec3 bitangent = normalize(cross(surfaceNormal, tangent));
+            vec3 mappedNormal = normalize(tangent * tangentNormal.x - bitangent * tangentNormal.y + surfaceNormal * max(tangentNormal.z, 0.15));
+            surfaceNormal = normalize(mix(surfaceNormal, mappedNormal, 0.24));
           }
-          vec3 lightDirection = normalize(vec3(-0.42, -0.48, 0.77));
-          float diffuse = 0.58 + 0.42 * max(dot(normalize(vNormal), lightDirection), 0.0);
-          color *= diffuse;
+          vec3 lightDirection = normalize(vec3(-0.38, -0.46, 0.80));
+          float diffuse = 0.72 + 0.28 * max(dot(surfaceNormal, lightDirection), 0.0);
+          float slopeShade = mix(1.0, 0.88, 1.0 - clamp(surfaceNormal.z, 0.0, 1.0));
+          color *= diffuse * slopeShade * 1.08;
           gl_FragColor = vec4(color, 1.0);
         }
       `,
       side: THREE.DoubleSide,
       toneMapped: true,
     });
-  }, [viewMode, data.maxHeight, settings.layers]);
+  }, [viewMode, data.maxHeight, settings.layers, settings.texScale, surfaceTextures]);
 
   useEffect(() => {
     if (meshRef.current && refreshRevision > 0) restoreGeometry(meshRef.current.geometry, data);
@@ -330,36 +408,54 @@ function PropsBatch({ data, visible, vegetationRevision }: { data: TerrainData; 
     }
     return { trees: new Float32Array(trees), rocks: new Float32Array(rocks) };
   }, [data, vegetationRevision]);
-  const treeRef = useRef<THREE.InstancedMesh>(null);
   const trunkRef = useRef<THREE.InstancedMesh>(null);
+  const frondRef = useRef<THREE.InstancedMesh>(null);
   const rockRef = useRef<THREE.InstancedMesh>(null);
-  const treeGeo = useMemo(() => new THREE.ConeGeometry(0.9, 3.4, 7), []);
-  const trunkGeo = useMemo(() => new THREE.CylinderGeometry(0.09, 0.15, 2.3, 6), []);
-  const rockGeo = useMemo(() => new THREE.IcosahedronGeometry(1, 0), []);
-  const treeMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#3d7840", roughness: 1 }), []);
-  const trunkMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#806044", roughness: 1 }), []);
-  const rockMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#77766e", roughness: 1 }), []);
+  const trunkGeo = useMemo(() => {
+    const geometry = new THREE.CylinderGeometry(0.075, 0.13, 3.2, 7, 4);
+    geometry.rotateX(Math.PI / 2);
+    return geometry;
+  }, []);
+  const frondGeo = useMemo(() => {
+    const geometry = new THREE.ConeGeometry(0.16, 2.5, 5, 1);
+    geometry.rotateZ(-Math.PI / 2);
+    geometry.translate(1.16, 0, 0);
+    return geometry;
+  }, []);
+  const rockGeo = useMemo(() => new THREE.IcosahedronGeometry(1, 1), []);
+  const trunkMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#92724c", roughness: 1 }), []);
+  const frondMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#47763c", roughness: 1, side: THREE.DoubleSide }), []);
+  const rockMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#817b70", roughness: 1 }), []);
   useEffect(() => {
     const temp = new THREE.Object3D();
+    const frondsPerTree = 7;
     for (let i = 0; i < split.trees.length; i += 6) {
-      const j = i / 6, x = split.trees[i], y = split.trees[i + 1], z = split.trees[i + 2], scale = split.trees[i + 3], rot = split.trees[i + 4];
+      const j = i / 6;
+      const x = split.trees[i], y = split.trees[i + 1], z = split.trees[i + 2];
+      const scale = split.trees[i + 3], rot = split.trees[i + 4];
       temp.position.set(x, y, z + scale * 1.45);
       temp.rotation.set(0, 0, rot);
-      temp.scale.setScalar(scale);
-      temp.updateMatrix();
-      treeRef.current?.setMatrixAt(j, temp.matrix);
-      temp.position.set(x, y, z + scale * 0.7);
-      temp.scale.set(scale * 0.18, scale * 0.18, scale * 0.85);
+      temp.scale.set(scale * 0.16, scale * 0.16, scale * 0.9);
       temp.updateMatrix();
       trunkRef.current?.setMatrixAt(j, temp.matrix);
+      for (let leaf = 0; leaf < frondsPerTree; leaf++) {
+        const angle = rot + (leaf / frondsPerTree) * Math.PI * 2;
+        const index = j * frondsPerTree + leaf;
+        temp.position.set(x, y, z + scale * (2.75 + (leaf % 2) * 0.12));
+        temp.rotation.set((leaf % 2 ? 0.18 : -0.12), -0.13, angle);
+        temp.scale.set(scale * 0.94, scale * 0.35, scale * 0.22);
+        temp.updateMatrix();
+        frondRef.current?.setMatrixAt(index, temp.matrix);
+      }
     }
-    if (treeRef.current) treeRef.current.instanceMatrix.needsUpdate = true;
     if (trunkRef.current) trunkRef.current.instanceMatrix.needsUpdate = true;
+    if (frondRef.current) frondRef.current.instanceMatrix.needsUpdate = true;
     for (let i = 0; i < split.rocks.length; i += 6) {
-      const j = i / 6, x = split.rocks[i], y = split.rocks[i + 1], z = split.rocks[i + 2], scale = split.rocks[i + 3], rot = split.rocks[i + 4];
-      temp.position.set(x, y, z + scale * 0.4);
-      temp.rotation.set(rot * 0.25, rot, 0);
-      temp.scale.set(scale, scale * 0.8, scale * 0.65);
+      const j = i / 6, x = split.rocks[i], y = split.rocks[i + 1], z = split.rocks[i + 2];
+      const scale = split.rocks[i + 3], rot = split.rocks[i + 4];
+      temp.position.set(x, y, z + scale * 0.34);
+      temp.rotation.set(rot * 0.25, rot * 0.7, rot);
+      temp.scale.set(scale, scale * 0.82, scale * 0.66);
       temp.updateMatrix();
       rockRef.current?.setMatrixAt(j, temp.matrix);
     }
@@ -367,16 +463,15 @@ function PropsBatch({ data, visible, vegetationRevision }: { data: TerrainData; 
   }, [split]);
   return (
     <>
-      <instancedMesh ref={treeRef} args={[treeGeo, treeMat, split.trees.length / 6]} visible={visible} castShadow receiveShadow />
       <instancedMesh ref={trunkRef} args={[trunkGeo, trunkMat, split.trees.length / 6]} visible={visible} castShadow receiveShadow />
+      <instancedMesh ref={frondRef} args={[frondGeo, frondMat, split.trees.length / 6 * 7]} visible={visible} castShadow receiveShadow />
       <instancedMesh ref={rockRef} args={[rockGeo, rockMat, split.rocks.length / 6]} visible={visible} castShadow receiveShadow />
     </>
   );
 }
-
 function GrassBatch({ data, visible, vegetationRevision }: { data: TerrainData; visible: boolean; vegetationRevision: number }) {
   const mesh = useRef<THREE.InstancedMesh>(null);
-  const geometry = useMemo(() => new THREE.ConeGeometry(0.075, 0.58, 3), []);
+  const geometry = useMemo(() => { const shape = new THREE.ConeGeometry(0.075, 0.58, 3); shape.rotateX(Math.PI / 2); return shape; }, []);
   const material = useMemo(() => new THREE.MeshStandardMaterial({ color: "#528c4a", roughness: 1 }), []);
   useEffect(() => {
     const temp = new THREE.Object3D();
