@@ -70,6 +70,7 @@ Example body (abbreviated):
       "heights": 263169,
       "blendWeights": 1052676,
       "vegetationMask": 263169,
+      "land": 263169,
       "props": 12000,
       "grass": 40000
     },
