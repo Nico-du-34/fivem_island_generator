@@ -1,6 +1,6 @@
 # Native export bridge contract
 
-The browser editor sends edited terrain buffers and selected GunWare material references to the Windows worker in [native-worker/](../native-worker/). The worker uses Blender, Sollumz and PyMateria to produce native YDR/YBN/YTYP/YTD assets, plus a YMAP CodeWalker XML. The Next.js API routes are an authenticated proxy only. The YMAP binary must still be finalized in CodeWalker; the returned ZIP stays marked as not ready until that is done.
+The browser editor sends edited terrain buffers and selected GunWare material references to the Windows worker in [native-worker/](../native-worker/). The worker uses Blender, Sollumz, szio and PyMateria to produce native YDR/YBN/YMAP/YTYP/YTD resources. The Next.js API routes are an authenticated proxy only. The worker reopens each native YMAP with szio before it marks the ZIP ready. CodeWalker is optional for inspection/editing, not required as a conversion step.
 
 ## Configuration
 
@@ -134,13 +134,13 @@ The source package deliberately separates the high-resolution visual terrain fro
 4. Convert the separate coarse collision source into YBN collision geometry. Assign valid GTA collision materials/flags; a plain OBJ is not a collision asset.
 5. Build the material dictionary/YTD using the chosen GTA diffuse and normal textures or user-supplied replacements. Create mipmaps and confirm each shader/material points to valid texture entries.
 6. Place tree, rock and grass model references using the placement arrays. Validate that every selected archetype exists in the target game build.
-7. Create YTYP archetypes and YMAP placements, then produce the required CodeWalker XML/binary sidecars and map manifest data for the target build.
+7. Create YTYP archetypes and YMAP placements, then export AssetMapData through the native szio/PyMateria provider. Keep optional CWXML copies only as editable source.
 8. Generate LOD/SLOD, world bounds, native water configuration and procedural-grass/material tags.
 9. Create fxmanifest.lua and stream/ references that match the generated native files. Start a clean FiveM test server and verify terrain, collision, water, materials, vegetation and streaming at distance.
 
-Sollumz supports native GTA asset authoring and binary export for several formats, but YMAP workflows may still involve XML/CodeWalker conversion depending on the specific tool version and target. Pin the exact Blender, Sollumz, CodeWalker and game build versions used by the worker; do not assume an XML export is equivalent to a validated game-ready map.
+The current szio native provider calls PyMateria MapData.export_rsc for AssetMapData. Its test suite includes a native YMAP round-trip test: it exports an AssetMapData as .ymap, reopens the file with try_load_asset, and compares the map data. The Gen9 provider falls back to the shared native MapData writer for map assets. The worker now follows this path and validates the generated YMAP with the same reader before packaging. CodeWalker remains useful for visual inspection and manual edits, but is not part of the required binary conversion pipeline.
 
-Do not return state: "done" until the ZIP contains the required native files and validation has passed. A source-only OBJ/GLB/RAW ZIP must never be represented as a native FiveM map.
+Do not return state: "done" until the ZIP contains the required native files and validation has passed. A source-only OBJ/GLB/RAW ZIP must never be represented as a native FiveM map. Native export is only marked ready after YDR/YBN/YMAP/YTYP/YTD files exist and each YMAP has passed the szio read-back check.
 
 ## Operational requirements
 
@@ -156,28 +156,33 @@ Do not return state: "done" until the ZIP contains the required native files and
 
 The repository contains a Node.js worker and a Blender background script:
 
-- native-worker/server.mjs — bearer-token HTTP service, request validation, one-at-a-time queue, job polling and ZIP download.
-- native-worker/blender/export_island.py — terrain reconstruction, tile mesh creation, collision BVH, YDR/YBN/YTYP/YTD exports, YMAP entities and LOD hierarchy.
-- native-worker/finalize-ymap.ps1 — integrates a binary YMAP saved by CodeWalker into stream/ and updates nativeReady metadata.
+- native-worker/server.mjs — bearer-token HTTP service, payload validation, one-at-a-time queue, job polling and ZIP download.
+- native-worker/blender/export_island.py — terrain reconstruction, tile mesh creation, collision BVH, native YDR/YBN/YMAP/YTYP/YTD generation, LOD hierarchy and szio YMAP round-trip validation.
 - native-worker/README.md — Windows prerequisites and installation instructions.
 
 The worker listens on port 8787 by default. Configure the same ISLAND_EXPORT_BRIDGE_TOKEN on the Windows host and Next.js server. Never expose this service directly to the public internet.
 
-### Output state
+### Native output contract
 
-The current worker generates six visual LOD tiers per terrain tile (HD, LOD, SLOD1–SLOD4), a coarse independent BVH collision, one YTYP archetype per drawable/LOD, and YTD material images. Tree and rock placements are YMAP entities referencing game archetypes.
+The worker generates six visual LOD tiers per terrain tile (HD, LOD, SLOD1–SLOD4), a coarse independent BVH collision, YTYP archetypes, a YTD texture dictionary and a native binary YMAP. Tree and rock placements are YMAP entities referencing game archetypes.
 
-The worker deliberately returns:
-- state done after the binary YDR/YBN/YTYP/YTD assets and YMAP XML have been validated.
-- nativeReady false until the matching YMAP XML is saved as a binary .ymap in CodeWalker and passed to finalize-ymap.ps1.
+The worker deliberately returns state done and nativeReady true only after:
+- YDR, YBN, YMAP, YTYP and YTD assets have all been found.
+- The native YMAP has the RSC7 header.
+- Each generated YMAP has been reopened through szio.try_load_asset and contains entities.
 
-A source XML file is not a binary YMAP. The package must not be treated as a complete FiveM island until finalization and a clean-server test.
+The szio project test_maps.py demonstrates a native AssetMapData round-trip. The native provider calls PyMateria MapData.export_rsc; the Gen9 provider delegates map data to that shared writer:
+- https://github.com/Sollumz/szio/blob/main/tests/test_maps.py
+- https://github.com/Sollumz/szio/blob/main/src/szio/gta5/native/provider.py
+- https://github.com/Sollumz/szio/blob/main/src/szio/gta5/native/provider_gen9.py
+
+Optional CWXML source copies are placed in sources/cwxml/ for inspection and editing. They are not used to produce the binary map. CodeWalker is optional for reviewing the result, not a mandatory conversion step.
 
 ### Still not emitted as native map data
 
 - Native GTA water quads are not built yet; water configuration is placed in config/water.json.
-- Grass points are preserved in config/grass-placements.json, but are not yet serialized as a YMAP grass batch.
+- Grass points are preserved in config/grass-placements.json, but are not yet serialized as a native YMAP grass instance list.
 - Tree and rock model names are existing GTA archetype references; the worker does not bundle those models or guarantee their presence on a modified game build.
 - The worker creates generated fallback diffuse/normal PNGs when no image override is provided. The uploaded GunWare source bundle contained texture dictionary names, not the original source bitmaps. Use GUNWARE_TEXTURE_DIR for legally available texture replacements.
 
-See [native-worker/README.md](../native-worker/README.md) for setup and the CodeWalker finalization command.
+See [native-worker/README.md](../native-worker/README.md) for Windows setup.
