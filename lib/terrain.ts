@@ -1,8 +1,10 @@
+import { getGunwareMaterial, type GunwareMaterialId } from "./gunware-materials";
+
 export type IslandShape =
   | "round" | "long" | "crescent" | "twin" | "archipelago"
   | "atoll" | "volcano" | "continent" | "islands";
 
-export type MaterialLayer = "sand_beach" | "grass_lush" | "rock_cliff" | "dirt_forest";
+export type MaterialLayer = GunwareMaterialId;
 
 export type IslandSettings = {
   name: string;
@@ -88,10 +90,10 @@ export const SHAPES: { id: IslandShape; label: string }[] = [
 ];
 
 export const MATERIAL_OPTIONS: { id: MaterialLayer; label: string; color: string }[] = [
-  { id: "sand_beach", label: "Sable de plage", color: "#cbb783" },
-  { id: "grass_lush", label: "Herbe tropicale", color: "#608b4d" },
-  { id: "rock_cliff", label: "Roche / falaise", color: "#77776f" },
-  { id: "dirt_forest", label: "Terre / forêt", color: "#795d42" },
+  { id: "sand_beach", label: "Sable", color: "#d9c9a3" },
+  { id: "grass_lush", label: "Herbe", color: "#5d7134" },
+  { id: "rock_cliff", label: "Roche", color: "#7d7466" },
+  { id: "dirt_forest", label: "Terre", color: "#6e5f45" },
 ];
 
 export const DEFAULT_SETTINGS: IslandSettings = {
@@ -160,141 +162,233 @@ const smoothstep = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
-function hash2(x: number, y: number, seed: number) {
-  let n = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(seed | 0, 1442695041)) | 0;
-  n = Math.imul(n ^ (n >>> 13), 1274126177);
-  n ^= n >>> 16;
-  return (n >>> 0) / 4294967295;
+function createSeededRandom(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
 }
 
-function valueNoise(x: number, y: number, seed: number) {
-  const ix = Math.floor(x), iy = Math.floor(y);
-  const fx = x - ix, fy = y - iy;
-  const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
-  const a = hash2(ix, iy, seed), b = hash2(ix + 1, iy, seed);
-  const c = hash2(ix, iy + 1, seed), d = hash2(ix + 1, iy + 1, seed);
-  return ((a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sy) * 2 - 1;
-}
-
-function fbm(x: number, y: number, seed: number, octaves = 5) {
-  let total = 0, amplitude = 0.55, frequency = 1, norm = 0;
-  for (let octave = 0; octave < octaves; octave++) {
-    total += valueNoise(x * frequency, y * frequency, seed + octave * 101) * amplitude;
-    norm += amplitude;
-    amplitude *= 0.5;
-    frequency *= 2.03;
+function createSimplexNoise(seed: number) {
+  const random = createSeededRandom(seed);
+  const permutation = new Uint8Array(512);
+  const source = new Uint8Array(256);
+  const gradients = [
+    [1, 1], [-1, 1], [1, -1], [-1, -1],
+    [1, 0], [-1, 0], [1, 0], [-1, 0],
+    [0, 1], [0, -1], [0, 1], [0, -1],
+  ];
+  for (let i = 0; i < 256; i++) source[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    const value = source[i];
+    source[i] = source[j];
+    source[j] = value;
   }
-  return total / norm;
+  for (let i = 0; i < 512; i++) permutation[i] = source[i & 255];
+
+  const noise = (x: number, y: number) => {
+    const f2 = 0.5 * (Math.sqrt(3) - 1);
+    const g2 = (3 - Math.sqrt(3)) / 6;
+    const skew = (x + y) * f2;
+    const i = Math.floor(x + skew), j = Math.floor(y + skew);
+    const unskew = (i + j) * g2;
+    const x0 = x - (i - unskew), y0 = y - (j - unskew);
+    const i1 = x0 > y0 ? 1 : 0, j1 = x0 > y0 ? 0 : 1;
+    const x1 = x0 - i1 + g2, y1 = y0 - j1 + g2;
+    const x2 = x0 - 1 + 2 * g2, y2 = y0 - 1 + 2 * g2;
+    const ii = i & 255, jj = j & 255;
+    // The three simplex corners use the same permutation table with their own offsets.
+    const p0 = gradients[permutation[ii + permutation[jj]] % 12];
+    const p1 = gradients[permutation[ii + i1 + permutation[jj + j1]] % 12];
+    const p2 = gradients[permutation[ii + 1 + permutation[jj + 1]] % 12];
+    const corner = (cx: number, cy: number, gradient: number[]) => {
+      const attenuation = 0.5 - cx * cx - cy * cy;
+      if (attenuation <= 0) return 0;
+      const a = attenuation * attenuation;
+      return a * a * (gradient[0] * cx + gradient[1] * cy);
+    };
+    return 70 * (corner(x0, y0, p0) + corner(x1, y1, p1) + corner(x2, y2, p2));
+  };
+
+  const fbm = (x: number, y: number, octaves: number, lacunarity = 2, persistence = 0.5) => {
+    let amplitude = 1, frequency = 1, total = 0, norm = 0;
+    for (let octave = 0; octave < octaves; octave++) {
+      total += amplitude * noise(x * frequency + octave * 17.31, y * frequency - octave * 9.73);
+      norm += amplitude;
+      amplitude *= persistence;
+      frequency *= lacunarity;
+    }
+    return total / Math.max(0.0001, norm);
+  };
+  const ridged = (x: number, y: number, octaves: number, lacunarity = 2.1, persistence = 0.5) => {
+    let amplitude = 0.5, frequency = 1, total = 0, norm = 0, weight = 1;
+    for (let octave = 0; octave < octaves; octave++) {
+      let ridge = 1 - Math.abs(noise(x * frequency + octave * 31.7, y * frequency + octave * 11.1));
+      ridge *= ridge * weight;
+      weight = clamp(ridge * 2);
+      total += ridge * amplitude;
+      norm += amplitude;
+      amplitude *= persistence;
+      frequency *= lacunarity;
+    }
+    return total / Math.max(0.0001, norm);
+  };
+  return { noise, fbm, ridged };
 }
 
-function ellipseDistance(x: number, y: number, cx: number, cy: number, rx: number, ry = rx) {
-  return Math.hypot((x - cx) / rx, (y - cy) / ry);
-}
+type TerrainSample = { height: number; land: number; coast: number; slopeHint: number };
+type TerrainSampler = (nx: number, ny: number) => TerrainSample;
 
-function shapeDistance(shape: IslandShape, x: number, y: number, coverage: number) {
-  const scale = 0.48 + coverage * 0.52;
-  const base = ellipseDistance(x, y, 0, 0, 0.91 * scale, 0.82 * scale);
-  switch (shape) {
-    case "long":
-      return ellipseDistance(x, y, 0, 0, 1.15 * scale, 0.56 * scale);
-    case "crescent": {
-      const outer = ellipseDistance(x, y, -0.02, 0.02, 1.0 * scale, 0.86 * scale);
-      const inner = ellipseDistance(x, y, 0.20, 0.05, 0.79 * scale, 0.73 * scale);
-      return Math.max(outer, 1.0 - inner * 0.9);
+function createTerrainSampler(p: IslandSettings): TerrainSampler {
+  const shapeNoise = createSimplexNoise(p.seed + 17);
+  const warpNoise = createSimplexNoise(p.seed + 101);
+  const coastNoise = createSimplexNoise(p.seed + 233);
+  const hillsNoise = createSimplexNoise(p.seed + 347);
+  const mountainNoise = createSimplexNoise(p.seed + 461);
+  const seaNoise = createSimplexNoise(p.seed + 577);
+  const shapeRandom = createSeededRandom(p.seed + 701);
+  const angle = shapeRandom() * Math.PI * 2;
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  const blobs: { x: number; y: number; radius: number }[] = [];
+
+  if (p.shape === "archipelago") {
+    const count = 4 + Math.floor(shapeRandom() * 4);
+    for (let i = 0; i < count; i++) {
+      const direction = shapeRandom() * Math.PI * 2;
+      const distance = p.coverage * (0.55 + shapeRandom() * 0.40);
+      blobs.push({
+        x: Math.cos(direction) * distance + (shapeRandom() - 0.5) * p.coverage * 0.18,
+        y: Math.sin(direction) * distance + (shapeRandom() - 0.5) * p.coverage * 0.18,
+        radius: p.coverage * (0.14 + shapeRandom() * 0.16),
+      });
     }
-    case "twin":
-      return Math.min(ellipseDistance(x, y, -0.38, 0, 0.58 * scale, 0.72 * scale), ellipseDistance(x, y, 0.40, 0.02, 0.60 * scale, 0.70 * scale));
-    case "archipelago": {
-      const centers = [[-0.48, 0.15, 0.34], [-0.06, 0.30, 0.32], [0.36, 0.10, 0.38], [0.12, -0.40, 0.33], [-0.52, -0.38, 0.23]];
-      return Math.min(...centers.map(([cx, cy, r]) => ellipseDistance(x, y, cx, cy, r * scale, r * scale * 0.82)));
-    }
-    case "atoll": {
-      const d = ellipseDistance(x, y, 0, 0, 0.94 * scale, 0.85 * scale);
-      const lagoon = ellipseDistance(x, y, 0.04, -0.01, 0.47 * scale, 0.38 * scale);
-      return Math.max(d, 1.0 - lagoon * 0.92);
-    }
-    case "volcano": {
-      const d = ellipseDistance(x, y, 0, 0, 0.84 * scale, 0.82 * scale);
-      const crater = ellipseDistance(x, y, 0.04, 0.05, 0.15 * scale, 0.13 * scale);
-      return Math.max(d, 1.0 - crater * 0.55);
-    }
-    case "continent":
-      return Math.min(
-        ellipseDistance(x, y, -0.12, 0.05, 1.10 * scale, 0.95 * scale),
-        ellipseDistance(x, y, 0.46, -0.18, 0.55 * scale, 0.66 * scale),
-      ) + Math.max(0, Math.abs(x) - 0.92) * 0.3;
-    case "islands": {
-      const centers = [[-0.55, 0.42, 0.28], [-0.12, 0.52, 0.28], [0.38, 0.45, 0.32], [-0.45, -0.08, 0.27], [0.02, -0.14, 0.32], [0.55, -0.18, 0.28], [-0.15, -0.60, 0.25], [0.38, -0.58, 0.22]];
-      return Math.min(...centers.map(([cx, cy, r]) => ellipseDistance(x, y, cx, cy, r * scale, r * scale * 0.85)));
-    }
-    default:
-      return base;
+  } else if (p.shape === "twin") {
+    const distance = p.coverage * 0.42;
+    blobs.push({ x: -distance, y: 0, radius: p.coverage * 0.55 });
+    blobs.push({ x: distance, y: (shapeRandom() - 0.5) * p.coverage * 0.3, radius: p.coverage * (0.40 + shapeRandom() * 0.1) });
   }
+
+  const softUnion = (a: number, b: number, k: number) => {
+    const h = Math.max(k - Math.abs(a - b), 0) / k;
+    return Math.max(a, b) + h * h * k * 0.25;
+  };
+
+  return (nx, ny) => {
+    const warpX = warpNoise.fbm(nx * 1.4, ny * 1.4, 3) * p.warp * 0.3;
+    const warpY = warpNoise.fbm(nx * 1.4 + 7.7, ny * 1.4 - 3.1, 3) * p.warp * 0.3;
+    const wx = nx + warpX, wy = ny + warpY;
+    const x = wx * cos - wy * sin;
+    const y = wx * sin + wy * cos;
+    const radius = Math.hypot(x, y);
+
+    let shape = 0;
+    if (p.shape === "round" || p.shape === "volcano") {
+      shape = 1 - radius / Math.max(0.08, p.coverage);
+    } else if (p.shape === "long") {
+      shape = 1 - Math.hypot(x / Math.max(0.08, p.coverage * 1.35), y / Math.max(0.08, p.coverage * 0.55));
+    } else if (p.shape === "crescent") {
+      const outer = 1 - radius / Math.max(0.08, p.coverage);
+      const inner = Math.hypot(x - p.coverage * 0.5, y) / Math.max(0.08, p.coverage * 0.72) - 1;
+      shape = Math.min(outer, inner * 1.4);
+    } else if (p.shape === "atoll") {
+      shape = 1 - Math.abs(radius - p.coverage * 0.78) / Math.max(0.06, p.coverage * 0.2);
+    } else if (p.shape === "twin" || p.shape === "archipelago") {
+      shape = -10;
+      for (const blob of blobs) {
+        const influence = 1 - Math.hypot(wx - blob.x, wy - blob.y) / Math.max(0.05, blob.radius);
+        shape = softUnion(shape, influence, 0.35);
+      }
+    } else if (p.shape === "continent") {
+      const continentNoise = shapeNoise.fbm(x * 1.3 + 3.1, y * 1.3 - 1.7, 5);
+      shape = (1 - radius / Math.max(0.08, p.coverage * 1.12)) * 0.8 + continentNoise * 0.62 - 0.04;
+    } else {
+      const islandNoise = shapeNoise.fbm(x * 2.6 + 0.4, y * 2.6 + 5.2, 5);
+      shape = (islandNoise - (0.33 - p.coverage * 0.42)) * 3 - smoothstep(0.82, 1.02, radius) * 1.6;
+    }
+
+    const coastDetail =
+      coastNoise.fbm(wx * 2.2, wy * 2.2, 3) * p.coastNoise * 0.28 +
+      coastNoise.fbm(wx * 9, wy * 9, 3) * p.coastNoise * 0.07 +
+      Math.sin(Math.atan2(wy, wx) * 13 + p.seed * 0.019) * p.coastNoise * 0.012;
+    const coast = shape + coastDetail;
+    const land = smoothstep(-0.018, 0.045, coast);
+    const inland = smoothstep(0.015, 0.65, Math.max(0, coast));
+
+    const hills = hillsNoise.fbm(wx * 2.7 + 8, wy * 2.7 - 4, 6) * 0.5 + 0.5;
+    const broad = hillsNoise.fbm(wx * 0.9, wy * 0.9, 4) * 0.5 + 0.5;
+    const ridges = mountainNoise.ridged(wx * 1.6, wy * 1.6, 6);
+    const peakMask = smoothstep(0.08, 0.62, coast);
+
+    let relief = Math.pow(Math.max(0.0001, inland), 0.85) *
+      (0.28 + 0.36 * p.hills * (0.3 + hills * 1.1) + 0.16 * broad * p.hills);
+    relief *= 1 - p.mountains * 0.25;
+    relief += p.mountains * Math.pow(ridges, 1.45) * peakMask * 0.95;
+    relief += p.mountains * Math.pow(Math.max(0, broad - 0.55), 1.5) * peakMask * 0.45;
+
+    if (p.shape === "volcano") {
+      const normalizedRadius = radius / Math.max(0.05, p.coverage);
+      const ring = Math.exp(-Math.pow((normalizedRadius - 0.48) / 0.2, 2));
+      const crater = Math.exp(-Math.pow(normalizedRadius / 0.14, 2));
+      relief = inland * (0.10 + ring * p.mountains * 1.2 + hills * p.hills * 0.2 - crater * 0.35);
+    } else if (p.shape === "atoll") {
+      relief = inland * (0.08 + hills * p.hills * 0.12);
+    }
+
+    if (p.terraces > 0.001 && coast > 0) {
+      const stepHeight = Math.max(3, p.maxHeight / 9);
+      const stepped = Math.floor((relief * p.maxHeight) / stepHeight);
+      relief = (relief * p.maxHeight + (stepped * stepHeight - relief * p.maxHeight) * p.terraces) / Math.max(1, p.maxHeight);
+    }
+
+    if (coast > 0) {
+      const rawHeight = Math.max(0, relief) * p.maxHeight;
+      return { height: rawHeight, land, coast, slopeHint: 0 };
+    }
+
+    const depth = Math.max(0, -coast);
+    const seaFloor = p.seaDepth * Math.pow(smoothstep(0.015, 0.72, depth), 1.25);
+    const undulation = seaNoise.fbm(nx * 0.45, ny * 0.45, 3) * 0.55 * smoothstep(0.02, 0.24, depth);
+    return { height: -seaFloor + undulation, land, coast, slopeHint: 0 };
+  };
 }
 
 export function sampleTerrain(nx: number, ny: number, p: IslandSettings) {
-  const warpX = fbm(nx * 2.2 + 17, ny * 2.2, p.seed + 11) * p.warp * 0.18;
-  const warpY = fbm(nx * 2.2, ny * 2.2 - 23, p.seed + 29) * p.warp * 0.18;
-  const x = nx + warpX, y = ny + warpY;
-  const distance = shapeDistance(p.shape, x, y, p.coverage);
-  const angular = Math.atan2(y, x);
-  const coastFractal =
-    fbm(x * 2.4, y * 2.4, p.seed) * 0.15 +
-    fbm(x * 7.5, y * 7.5, p.seed + 37) * 0.045 +
-    Math.sin(angular * 7 + p.seed * 0.19) * 0.025;
-  const roughness = p.coastNoise * 0.22;
-  const coast = distance + coastFractal * roughness;
-  const land = clamp(1 - smoothstep(0.88, 1.04, coast));
-  const inland = smoothstep(0.02, Math.max(0.08, p.beachWidth), land);
-
-  let mountainField = fbm(x * 1.55, y * 1.55, p.seed + 101) * 0.5 + 0.5;
-  let ridge = 1 - Math.abs(fbm(x * 2.4, y * 2.4, p.seed + 211));
-  let hills = fbm(x * 4.2, y * 4.2, p.seed + 313) * 0.5 + 0.5;
-  const spine = Math.exp(-Math.pow((x * 0.48 + y * 0.8 + 0.08) / 0.42, 2)) * smoothstep(-0.8, 0.1, y);
-  const broadRelief = (0.10 + hills * p.hills * 0.55 + (mountainField * 0.28 + ridge * 0.2 + spine * 0.45) * p.mountains);
-  let height = Math.max(0, broadRelief) * p.maxHeight * inland;
-  if (p.shape === "volcano") {
-    const ring = Math.exp(-Math.pow((Math.hypot(x, y) - 0.33) / 0.16, 2));
-    const crater = Math.exp(-Math.pow(Math.hypot(x, y) / 0.16, 2));
-    height = (0.08 + ring * (0.95 * p.mountains) + hills * p.hills * 0.25 - crater * 0.35) * p.maxHeight * inland;
-  }
-  if (p.shape === "atoll") {
-    height = (0.04 + hills * p.hills * 0.09) * p.maxHeight * inland;
-  }
-  if (p.terraces > 0.001) {
-    const steps = 5 + Math.round(p.terraces * 18);
-    const stepped = Math.floor((height / Math.max(1, p.maxHeight)) * steps) / steps;
-    height = height * (1 - p.terraces) + stepped * p.maxHeight * p.terraces;
-  }
-  const beachBand = smoothstep(0, p.beachWidth, land) * smoothstep(p.beachWidth + 0.12, p.beachWidth, land);
-  height = Math.max(0, height + beachBand * p.beachHeight * 0.42);
-  const seabed = -smoothstep(0.88, 1.35, coast) * p.seaDepth;
-  const finalHeight = land > 0.02 ? height : seabed;
-  return { height: finalHeight, land, coast, slopeHint: 0 };
+  return createTerrainSampler(p)(nx, ny);
 }
 
 function computeWeights(height: number, land: number, slope: number, p: IslandSettings) {
-  const sand = clamp((1 - smoothstep(p.beachHeight * 0.5, p.beachHeight * 4.2, height)) * (0.45 + land * 0.55));
-  const rock = clamp((slope - p.rockSlope) * 3.2 + smoothstep(p.maxHeight * 0.48, p.maxHeight * 0.9, height) * p.mountains * 0.38);
-  const dirt = clamp(p.dryness * (0.25 + smoothstep(p.maxHeight * 0.08, p.maxHeight * 0.45, height)) * (1 - rock * 0.5));
-  const grass = Math.max(0.001, 1 - sand - rock - dirt);
+  const beach = 1 - smoothstep(p.beachHeight * 0.7, p.beachHeight * 4.5, height);
+  const sand = clamp(beach * (0.22 + land * 0.78));
+  const rock = clamp((slope - p.rockSlope) * 2.8 + smoothstep(p.maxHeight * 0.28, p.maxHeight * 0.82, height) * p.mountains * 0.42);
+  const dirt = clamp((0.16 + p.dryness * 0.74) * (0.22 + smoothstep(p.maxHeight * 0.08, p.maxHeight * 0.55, height) * 0.78) * (1 - rock * 0.42));
+  const grass = Math.max(0.001, (1 - sand) * (1 - rock * 0.8) * (1 - dirt * 0.58));
   const total = sand + grass + rock + dirt;
   return [sand / total, grass / total, rock / total, dirt / total];
 }
 
-function materialColor(weights: number[], variation: number) {
-  const colors = [
-    [0.78, 0.69, 0.48],
-    [0.25, 0.42, 0.20],
-    [0.42, 0.40, 0.36],
-    [0.39, 0.29, 0.18],
-  ];
+function hexToLinear(hex: string) {
+  const value = Number.parseInt(hex.replace("#", ""), 16);
+  return [value >> 16 & 255, value >> 8 & 255, value & 255].map((channel) => {
+    const srgb = channel / 255;
+    return srgb <= 0.04045 ? srgb / 12.92 : Math.pow((srgb + 0.055) / 1.055, 2.4);
+  });
+}
+
+function materialColor(weights: number[], variation: number, layers: MaterialLayer[] = DEFAULT_SETTINGS.layers) {
+  const selected = [
+    getGunwareMaterial(layers[0], 0).tint,
+    getGunwareMaterial(layers[1], 1).tint,
+    getGunwareMaterial(layers[2], 2).tint,
+    getGunwareMaterial(layers[3], 3).tint,
+  ].map(hexToLinear);
   const out = [0, 0, 0];
   for (let layer = 0; layer < 4; layer++) {
-    for (let c = 0; c < 3; c++) out[c] += colors[layer][c] * weights[layer];
+    for (let channel = 0; channel < 3; channel++) out[channel] += selected[layer][channel] * weights[layer];
   }
-  const shade = 0.93 + variation * 0.11;
-  return out.map(v => clamp(v * shade));
+  const shade = 0.96 + variation * 0.12;
+  return out.map((value) => clamp(value * shade, 0, 1));
 }
 
 function seededRandom(seed: number) {
@@ -366,7 +460,7 @@ function thermalErosion(heights: Float32Array, land: Float32Array, n: number, st
   }
 }
 
-function makeLandmarks(p: IslandSettings): Landmark[] {
+function makeLandmarks(p: IslandSettings, sample: TerrainSampler): Landmark[] {
   const seeds: Omit<Landmark, "z">[] = [
     { id: "capital", label: "Centre urbain", type: "city", x: -0.16, y: -0.08 },
     { id: "port", label: "Port commercial", type: "port", x: -0.48, y: -0.30 },
@@ -377,20 +471,27 @@ function makeLandmarks(p: IslandSettings): Landmark[] {
     { id: "eastern-coast", label: "Côte orientale", type: "tourism", x: 0.60, y: 0.02 },
     { id: "wild-forest", label: "Forêt tropicale", type: "nature", x: -0.54, y: 0.45 },
   ];
-  return seeds.flatMap(seed => {
-    let x = seed.x, y = seed.y, sample = sampleTerrain(x, y, p);
-    if (sample.land < 0.32) {
+  return seeds.flatMap((seed) => {
+    let x = seed.x, y = seed.y, point = sample(x, y);
+    if (point.land < 0.32) {
       let found = false;
-      for (let radius = 0.04; radius < 0.32 && !found; radius += 0.04) {
-        for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 6) {
-          const tx = seed.x + Math.cos(angle) * radius, ty = seed.y + Math.sin(angle) * radius;
-          const candidate = sampleTerrain(tx, ty, p);
-          if (candidate.land > 0.35) { x = tx; y = ty; sample = candidate; found = true; break; }
+      for (let radius = 0.04; radius < 0.36 && !found; radius += 0.04) {
+        for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 12) {
+          const tx = seed.x + Math.cos(angle) * radius;
+          const ty = seed.y + Math.sin(angle) * radius;
+          const candidate = sample(tx, ty);
+          if (candidate.land > 0.45) {
+            x = tx;
+            y = ty;
+            point = candidate;
+            found = true;
+            break;
+          }
         }
       }
     }
-    if (sample.land < 0.32) return [];
-    return [{ ...seed, x: x * p.worldSize * 0.5, y: y * p.worldSize * 0.5, z: sample.height + 5 }];
+    if (point.land < 0.32) return [];
+    return [{ ...seed, x: x * p.worldSize * 0.5, y: y * p.worldSize * 0.5, z: point.height + 5 }];
   });
 }
 
@@ -411,47 +512,67 @@ export function generateIsland(p: IslandSettings): TerrainData {
   const heights = new Float32Array(count);
   const land = new Float32Array(count);
   const vegetationMask = new Float32Array(count);
-  let minHeight = Infinity, maxHeight = -Infinity, landCount = 0;
+  const sample = createTerrainSampler(p);
+  let rawPeak = 0, landCount = 0;
 
+  // Pass 1: evaluate a seeded coast/relief field. Positive terrain is normalized
+  // to the configured maximum altitude in pass 2 so every map uses its full range.
   for (let y = 0; y < n; y++) {
     const ny = (y / (n - 1)) * 2 - 1;
     for (let x = 0; x < n; x++) {
       const nx = (x / (n - 1)) * 2 - 1;
-      const idx = y * n + x;
-      const sample = sampleTerrain(nx, ny, p);
-      heights[idx] = sample.height;
-      land[idx] = sample.land;
-      vegetationMask[idx] = sample.land > 0.5 && sample.height > p.beachHeight * 2 ? 1 : 0;
-      if (sample.land > 0.2) landCount++;
-      minHeight = Math.min(minHeight, sample.height);
-      maxHeight = Math.max(maxHeight, sample.height);
-      positions[idx * 3] = nx * half;
-      positions[idx * 3 + 1] = ny * half;
-      positions[idx * 3 + 2] = sample.height;
+      const index = y * n + x;
+      const point = sample(nx, ny);
+      heights[index] = point.height;
+      land[index] = point.land;
+      if (point.land > 0.2) landCount++;
+      if (point.land > 0.5) rawPeak = Math.max(rawPeak, point.height);
+      positions[index * 3] = nx * half;
+      positions[index * 3 + 1] = ny * half;
     }
   }
 
+  const heightScale = p.maxHeight / Math.max(0.001, rawPeak);
+  for (let i = 0; i < count; i++) {
+    if (heights[i] > 0) heights[i] *= heightScale;
+  }
+
+  // Erosion is applied to the normalized height field, not to the raw noise.
   hydraulicErosion(heights, land, n, p.erosion, p.seed);
   thermalErosion(heights, land, n, p.thermal);
+
+  // A smooth beach profile raises the shallow seabed and lowers the shoreline
+  // into a walkable shelf, matching the reference generator's profile curve.
+  if (p.beachWidth > 0) {
+    const strength = p.beachWidth * 0.85;
+    const landCurve = p.beachHeight * 1.2 + 3 * p.beachWidth;
+    const seaCurve = 1.5 + 2.5 * p.beachWidth;
+    for (let i = 0; i < count; i++) {
+      const h = heights[i];
+      const curve = h >= 0 ? landCurve : seaCurve;
+      heights[i] = h - strength * curve * Math.tanh(h / Math.max(0.1, curve));
+    }
+  }
+
+  let minHeight = Infinity, maxHeight = -Infinity;
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-    const idx = y * n + x;
-    const h = heights[idx];
+    const index = y * n + x;
+    const h = heights[index];
     const left = heights[y * n + Math.max(0, x - 1)];
     const right = heights[y * n + Math.min(n - 1, x + 1)];
     const down = heights[Math.max(0, y - 1) * n + x];
     const up = heights[Math.min(n - 1, y + 1) * n + x];
-    const slope = Math.hypot((right - left) / (2 * cell), (up - down) / (2 * cell));
-    const weights = computeWeights(h, land[idx], slope, p);
-    blendWeights.set(weights, idx * 4);
-    const variation = fbm(x / n * 8, y / n * 8, p.seed + 991, 3);
-    colors.set(materialColor(weights, variation), idx * 3);
-    positions[idx * 3 + 2] = h;
-  }
-  minHeight = Infinity;
-  maxHeight = -Infinity;
-  for (let i = 0; i < heights.length; i++) {
-    if (heights[i] < minHeight) minHeight = heights[i];
-    if (heights[i] > maxHeight) maxHeight = heights[i];
+    const dx = (right - left) / (x === 0 || x === n - 1 ? cell : 2 * cell);
+    const dy = (up - down) / (y === 0 || y === n - 1 ? cell : 2 * cell);
+    const slope = Math.hypot(dx, dy);
+    const weights = computeWeights(h, land[index], slope, p);
+    blendWeights.set(weights, index * 4);
+    const variation = Math.sin((x + p.seed * 0.13) * 0.047) * Math.cos((y - p.seed * 0.09) * 0.039);
+    colors.set(materialColor(weights, variation, p.layers), index * 3);
+    positions[index * 3 + 2] = h;
+    vegetationMask[index] = land[index] > 0.5 && h > p.beachHeight * 0.55 && slope < 1.25 ? 1 : 0;
+    minHeight = Math.min(minHeight, h);
+    maxHeight = Math.max(maxHeight, h);
   }
 
   const indices: number[] = [];
@@ -466,53 +587,101 @@ export function generateIsland(p: IslandSettings): TerrainData {
     const tileX = Math.min(tileAxis - 1, Math.floor(x / (n - 1) * tileAxis));
     const tileY = Math.min(tileAxis - 1, Math.floor(y / (n - 1) * tileAxis));
     const tile = tileY * tileAxis + tileX;
-    const weights = [
-      (blendWeights[a * 4] + blendWeights[b * 4] + blendWeights[c * 4] + blendWeights[d * 4]) * 0.25,
-      (blendWeights[a * 4 + 1] + blendWeights[b * 4 + 1] + blendWeights[c * 4 + 1] + blendWeights[d * 4 + 1]) * 0.25,
-      (blendWeights[a * 4 + 2] + blendWeights[b * 4 + 2] + blendWeights[c * 4 + 2] + blendWeights[d * 4 + 2]) * 0.25,
-      (blendWeights[a * 4 + 3] + blendWeights[b * 4 + 3] + blendWeights[c * 4 + 3] + blendWeights[d * 4 + 3]) * 0.25,
-    ];
+    const weights = [0, 1, 2, 3].map((layer) =>
+      (blendWeights[a * 4 + layer] + blendWeights[b * 4 + layer] + blendWeights[c * 4 + layer] + blendWeights[d * 4 + layer]) * 0.25,
+    );
     const material = weights.indexOf(Math.max(...weights));
     faceTiles.push(tile, tile);
     faceMaterials.push(material, material);
   }
 
-  const rng = seededRandom(p.seed + 23);
-  const landAreaHa = (landCount / count) * (p.worldSize * p.worldSize) / 10000;
-  const treeTarget = Math.min(6500, Math.round(landAreaHa * p.treeDensity));
-  const rockTarget = Math.min(2200, Math.round(landAreaHa * p.rockDensity));
+  const sampleGrid = (worldX: number, worldY: number) => {
+    const gx = clamp((worldX + half) / cell, 0, n - 1.0001);
+    const gy = clamp((worldY + half) / cell, 0, n - 1.0001);
+    const ix = Math.floor(gx), iy = Math.floor(gy), fx = gx - ix, fy = gy - iy;
+    const i00 = iy * n + ix, i10 = i00 + 1, i01 = i00 + n, i11 = i01 + 1;
+    const blend = (array: Float32Array, offset: number, channels = 1) => {
+      const value = (channel: number) =>
+        array[i00 * channels + offset + channel] * (1 - fx) * (1 - fy) +
+        array[i10 * channels + offset + channel] * fx * (1 - fy) +
+        array[i01 * channels + offset + channel] * (1 - fx) * fy +
+        array[i11 * channels + offset + channel] * fx * fy;
+      return channels === 1 ? value(0) : Array.from({ length: channels }, (_, channel) => value(channel));
+    };
+    const height = blend(heights, 0) as number;
+    const landValue = blend(land, 0) as number;
+    const material = blend(blendWeights, 0, 4) as number[];
+    const ix0 = Math.max(0, ix - 1), ix1 = Math.min(n - 1, ix + 1);
+    const iy0 = Math.max(0, iy - 1), iy1 = Math.min(n - 1, iy + 1);
+    const slopeX = (heights[iy * n + ix1] - heights[iy * n + ix0]) / Math.max(cell, (ix1 - ix0) * cell);
+    const slopeY = (heights[iy1 * n + ix] - heights[iy0 * n + ix]) / Math.max(cell, (iy1 - iy0) * cell);
+    return { height, land: landValue, material, slope: Math.hypot(slopeX, slopeY) };
+  };
+
+  const rng = seededRandom(p.seed + 2309);
   const props: number[] = [];
-  const propTarget = treeTarget + rockTarget;
-  let attempts = 0, treePlaced = 0, rockPlaced = 0;
-  while (props.length / 6 < propTarget && attempts < propTarget * 15) {
-    attempts++;
-    const x = rng() * p.worldSize - half, y = rng() * p.worldSize - half;
-    const nx = x / half, ny = y / half;
-    const sample = sampleTerrain(nx, ny, p);
-    if (sample.land < 0.48 || sample.height < p.beachHeight * 2) continue;
-    const isRock = rockPlaced < rockTarget && (treePlaced >= treeTarget || rng() > 0.72);
-    if (isRock) rockPlaced++; else treePlaced++;
-    const scale = isRock ? 0.6 + rng() * 2 : 0.75 + rng() * 0.75;
-    props.push(x, y, sample.height, scale, rng() * Math.PI * 2, isRock ? 1 : 0);
+  const landAreaHa = (landCount / count) * (p.worldSize * p.worldSize) / 10000;
+  const treeSpacing = p.treeDensity > 0 ? Math.max(9, 100 / Math.sqrt(p.treeDensity)) : p.worldSize + 1;
+  const rockSpacing = p.rockDensity > 0 ? Math.max(7, 100 / Math.sqrt(p.rockDensity)) : p.worldSize + 1;
+  const maxTrees = Math.min(6500, Math.round(landAreaHa * p.treeDensity * 0.65));
+  const maxRocks = Math.min(2200, Math.round(landAreaHa * p.rockDensity * 0.5));
+  let treesPlaced = 0, rocksPlaced = 0;
+
+  for (let y = -half + treeSpacing * 0.5; y < half && treesPlaced < maxTrees; y += treeSpacing) {
+    for (let x = -half + treeSpacing * 0.5; x < half && treesPlaced < maxTrees; x += treeSpacing) {
+      const px = x + (rng() - 0.5) * treeSpacing * 0.72;
+      const py = y + (rng() - 0.5) * treeSpacing * 0.72;
+      const point = sampleGrid(px, py);
+      if (point.land < 0.48 || point.height < p.beachHeight * 0.65 || point.slope > 0.8) continue;
+      const vegetation = Math.max(0, point.material[1] + point.material[3] * 0.65 + point.material[0] * 0.18);
+      const probability = clamp((0.22 + vegetation * 0.9) * (1 - p.dryness * 0.3));
+      if (rng() > probability) continue;
+      const scale = 0.78 + rng() * 0.72;
+      props.push(px, py, point.height, scale, rng() * Math.PI * 2, 0);
+      treesPlaced++;
+    }
   }
 
-  const grassTarget = Math.min(30000, Math.round(landAreaHa * 10000 * p.grassDensity * 0.22));
-  const grass: number[] = [];
-  attempts = 0;
-  while (grass.length / 4 < grassTarget && attempts < grassTarget * 7) {
-    attempts++;
-    const x = rng() * p.worldSize - half, y = rng() * p.worldSize - half;
-    const sample = sampleTerrain(x / half, y / half, p);
-    if (sample.land < 0.5 || sample.height < p.beachHeight * 1.5) continue;
-    grass.push(x, y, sample.height, 0.6 + rng() * 1.2);
+  for (let y = -half + rockSpacing * 0.5; y < half && rocksPlaced < maxRocks; y += rockSpacing) {
+    for (let x = -half + rockSpacing * 0.5; x < half && rocksPlaced < maxRocks; x += rockSpacing) {
+      const px = x + (rng() - 0.5) * rockSpacing * 0.8;
+      const py = y + (rng() - 0.5) * rockSpacing * 0.8;
+      const point = sampleGrid(px, py);
+      if (point.land < 0.34 || point.height < -1) continue;
+      const probability = clamp((point.material[2] * 1.35 + point.material[3] * 0.35 + point.slope * 0.28) * (point.slope < 0.12 ? 0.35 : 1));
+      if (rng() > probability) continue;
+      const scale = 0.65 + rng() * 1.75;
+      props.push(px, py, point.height, scale, rng() * Math.PI * 2, 1);
+      rocksPlaced++;
+    }
   }
+
+  const grass: number[] = [];
+  if (p.grassDensity > 0) {
+    const grassSpacing = Math.max(2.2, 5 / Math.sqrt(p.grassDensity));
+    for (let y = -half + grassSpacing * 0.5; y < half && grass.length / 4 < 30000; y += grassSpacing) {
+      for (let x = -half + grassSpacing * 0.5; x < half && grass.length / 4 < 30000; x += grassSpacing) {
+        const px = x + (rng() - 0.5) * grassSpacing * 0.9;
+        const py = y + (rng() - 0.5) * grassSpacing * 0.9;
+        const point = sampleGrid(px, py);
+        if (point.land < 0.5 || point.height < p.beachHeight * 0.8 || point.slope > 1.1 || point.material[1] < 0.14) continue;
+        if (rng() > clamp(p.grassDensity * (0.45 + point.material[1] * 0.9))) continue;
+        grass.push(px, py, point.height, 0.55 + rng() * 1.25);
+      }
+    }
+  }
+
+  const sampleFinalGrid = (nx: number, ny: number): TerrainSample => {
+    const point = sampleGrid(nx * half, ny * half);
+    return { height: point.height, land: point.land, coast: point.land, slopeHint: point.slope };
+  };
 
   return {
     n, cell, half, positions, colors, blendWeights, indices: new Uint32Array(indices),
     heights, land, vegetationMask, props: new Float32Array(props), grass: new Float32Array(grass),
     faceTiles: new Uint16Array(faceTiles), faceMaterials: new Uint8Array(faceMaterials),
-    landmarks: makeLandmarks(p), minHeight, maxHeight, landRatio: landCount / count,
-    chunkCount: Math.max(1, tileAxis * tileAxis),
+    landmarks: makeLandmarks(p, sampleFinalGrid), minHeight, maxHeight,
+    landRatio: landCount / count, chunkCount: Math.max(1, tileAxis * tileAxis),
   };
 }
 
@@ -531,7 +700,9 @@ export function applyBrushInPlace(
   const gx = Math.round((worldX + data.half) / data.cell);
   const gy = Math.round((worldY + data.half) / data.cell);
   const cells = Math.max(1, Math.ceil(radius / data.cell));
-  const target = flattenTarget ?? data.heights[gy * data.n + gx] ?? 0;
+  const safeX = Math.max(0, Math.min(data.n - 1, gx));
+  const safeY = Math.max(0, Math.min(data.n - 1, gy));
+  const target = flattenTarget ?? data.heights[safeY * data.n + safeX] ?? 0;
   for (let y = Math.max(1, gy - cells); y <= Math.min(data.n - 2, gy + cells); y++) {
     for (let x = Math.max(1, gx - cells); x <= Math.min(data.n - 2, gx + cells); x++) {
       const dx = (x - gx) * data.cell, dy = (y - gy) * data.cell;
@@ -569,7 +740,7 @@ export function applyBrushInPlace(
       const color = materialColor([
         data.blendWeights[i * 4], data.blendWeights[i * 4 + 1],
         data.blendWeights[i * 4 + 2], data.blendWeights[i * 4 + 3],
-      ], 0);
+      ], 0, p.layers);
       data.colors.set(color, i * 3);
       data.positions[i * 3 + 2] = h;
     }

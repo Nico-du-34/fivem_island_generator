@@ -7,7 +7,8 @@ import {
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
-import { applyBrushInPlace, type IslandSettings, type MaterialLayer, type TerrainData } from "@/lib/terrain";
+import { applyBrushInPlace, type IslandSettings, type TerrainData } from "@/lib/terrain";
+import { getGunwareMaterial } from "@/lib/gunware-materials";
 
 export type BrushTool = "orbit" | "raise" | "lower" | "smooth" | "flatten" | "paint" | "erase" | "vegRemove" | "vegAdd";
 export type ViewMode = "render" | "height" | "material" | "wireframe";
@@ -160,13 +161,10 @@ function TerrainMesh({
       return new THREE.MeshBasicMaterial({ color: "#8996b9", wireframe: true, transparent: true, opacity: 0.62 });
     }
     const mode = viewMode === "height" ? 1 : viewMode === "material" ? 2 : 0;
-    const palette: Record<MaterialLayer, string> = {
-      sand_beach: "#c8b17d",
-      grass_lush: "#3f713c",
-      rock_cliff: "#77766e",
-      dirt_forest: "#795d42",
-    };
-    const layerColors = settings.layers.map((layer) => new THREE.Color(palette[layer] ?? "#777777"));
+    const layerRoles = [0, 1, 2, 3] as const;
+    const layerColors = settings.layers.map((layer, index) =>
+      new THREE.Color(getGunwareMaterial(layer, layerRoles[index]).tint),
+    );
     return new THREE.ShaderMaterial({
       uniforms: {
         uMaxHeight: { value: Math.max(1, data.maxHeight) },
@@ -174,7 +172,8 @@ function TerrainMesh({
         uLayer0: { value: layerColors[0] ?? new THREE.Color("#c8b17d") },
         uLayer1: { value: layerColors[1] ?? new THREE.Color("#3f713c") },
         uLayer2: { value: layerColors[2] ?? new THREE.Color("#77766e") },
-        uLayer3: { value: layerColors[3] ?? new THREE.Color("#795d42") },
+        uLayer3: { value: layerColors[3] ?? new THREE.Color("#6e5f45") },
+        uTexScale: { value: Math.max(1, settings.texScale) },
       },
       vertexShader: `
         attribute vec4 blendWeights;
@@ -199,38 +198,76 @@ function TerrainMesh({
         uniform vec3 uLayer1;
         uniform vec3 uLayer2;
         uniform vec3 uLayer3;
+        uniform float uTexScale;
         varying vec4 vWeights;
         varying vec3 vNormal;
         varying vec3 vWorldPosition;
         varying float vHeight;
-        void main() {
-          vec3 sand = uLayer0;
-          vec3 grass = uLayer1;
-          vec3 rock = uLayer2;
-          vec3 dirt = uLayer3;
-          vec3 color;
-          if (uViewMode > 0.5 && uViewMode < 1.5) {
-            float h = clamp(vHeight / uMaxHeight, 0.0, 1.0);
-            color = mix(vec3(0.07,0.20,0.34), vec3(0.33,0.53,0.32), smoothstep(0.0,0.46,h));
-            color = mix(color, vec3(0.73,0.72,0.65), smoothstep(0.58,0.9,h));
-          } else {
-            vec4 weights = max(vWeights, vec4(0.0));
-            float total = max(dot(weights, vec4(1.0)), 0.0001);
-            weights /= total;
-            color = sand * weights.r + grass * weights.g + rock * weights.b + dirt * weights.a;
-            float detail = sin(vWorldPosition.x * 0.075) * sin(vWorldPosition.y * 0.069) * 0.025;
-            if (uViewMode < 1.5) color *= 0.97 + detail;
+
+        float hash21(vec2 p) {
+          p = fract(p * vec2(123.34, 456.21));
+          p += dot(p, p + 45.32);
+          return fract(p.x * p.y);
+        }
+        float noise2(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          float a = hash21(i);
+          float b = hash21(i + vec2(1.0, 0.0));
+          float c = hash21(i + vec2(0.0, 1.0));
+          float d = hash21(i + vec2(1.0, 1.0));
+          return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+        }
+        float fbm(vec2 p) {
+          float value = 0.0;
+          float amplitude = 0.5;
+          for (int i = 0; i < 5; i++) {
+            value += noise2(p) * amplitude;
+            p *= 2.03;
+            amplitude *= 0.5;
           }
+          return value;
+        }
+        void main() {
+          vec4 weights = max(vWeights, vec4(0.0));
+          weights /= max(dot(weights, vec4(1.0)), 0.0001);
+          vec2 uv = vWorldPosition.xy / max(uTexScale, 1.0);
+          float fine = fbm(uv * 1.65);
+          float broad = fbm(uv * 0.34);
+          float grain = noise2(uv * 13.0);
+          float ridge = 1.0 - abs(noise2(uv * 2.8) * 2.0 - 1.0);
+
+          vec3 sand = uLayer0 * (0.88 + fine * 0.18 + grain * 0.08);
+          vec3 grass = uLayer1 * (0.72 + broad * 0.28 + fine * 0.12);
+          vec3 rock = uLayer2 * (0.78 + ridge * 0.34 + fine * 0.07);
+          vec3 dirt = uLayer3 * (0.78 + broad * 0.18 + grain * 0.10);
+          vec3 color = sand * weights.r + grass * weights.g + rock * weights.b + dirt * weights.a;
+
+          if (uViewMode > 0.5 && uViewMode < 1.5) {
+            float h = clamp(vHeight / uMaxHeight, -0.25, 1.0);
+            color = mix(vec3(0.055, 0.15, 0.22), vec3(0.25, 0.43, 0.26), smoothstep(0.0, 0.55, h));
+            color = mix(color, vec3(0.72, 0.70, 0.63), smoothstep(0.62, 0.94, h));
+          } else if (uViewMode > 1.5) {
+            color = vec3(weights.r, weights.g, weights.b);
+          }
+
+          vec3 normal = normalize(vNormal);
           vec3 lightDirection = normalize(vec3(-0.42, -0.48, 0.77));
-          float diffuse = 0.58 + 0.42 * max(dot(normalize(vNormal), lightDirection), 0.0);
-          color *= diffuse;
+          float slopeShade = 0.80 + 0.20 * max(normal.z, 0.0);
+          float diffuse = 0.66 + 0.34 * max(dot(normal, lightDirection), 0.0);
+          float microShade = 0.97 + (noise2(uv * 3.0) - 0.5) * 0.08;
+          color *= diffuse * slopeShade * microShade;
           gl_FragColor = vec4(color, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
         }
       `,
+
       side: THREE.DoubleSide,
       toneMapped: true,
     });
-  }, [viewMode, data.maxHeight, settings.layers]);
+  }, [viewMode, data.maxHeight, settings.layers, settings.texScale]);
 
   useEffect(() => {
     if (meshRef.current && refreshRevision > 0) restoreGeometry(meshRef.current.geometry, data);
@@ -330,30 +367,48 @@ function PropsBatch({ data, visible, vegetationRevision }: { data: TerrainData; 
     }
     return { trees: new Float32Array(trees), rocks: new Float32Array(rocks) };
   }, [data, vegetationRevision]);
-  const treeRef = useRef<THREE.InstancedMesh>(null);
+  const frondRef = useRef<THREE.InstancedMesh>(null);
   const trunkRef = useRef<THREE.InstancedMesh>(null);
   const rockRef = useRef<THREE.InstancedMesh>(null);
-  const treeGeo = useMemo(() => new THREE.ConeGeometry(0.9, 3.4, 7), []);
-  const trunkGeo = useMemo(() => new THREE.CylinderGeometry(0.09, 0.15, 2.3, 6), []);
+  const frondGeo = useMemo(() => {
+    const geometry = new THREE.ConeGeometry(0.13, 2.2, 5, 1);
+    geometry.rotateX(Math.PI / 2);
+    return geometry;
+  }, []);
+  const trunkGeo = useMemo(() => {
+    const geometry = new THREE.CylinderGeometry(0.08, 0.15, 2.5, 7);
+    geometry.rotateX(Math.PI / 2);
+    return geometry;
+  }, []);
   const rockGeo = useMemo(() => new THREE.IcosahedronGeometry(1, 0), []);
-  const treeMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#3d7840", roughness: 1 }), []);
+  const frondMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#3d7840", roughness: 1 }), []);
   const trunkMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#806044", roughness: 1 }), []);
   const rockMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#77766e", roughness: 1 }), []);
   useEffect(() => {
     const temp = new THREE.Object3D();
+    const up = new THREE.Vector3(0, 0, 1);
     for (let i = 0; i < split.trees.length; i += 6) {
-      const j = i / 6, x = split.trees[i], y = split.trees[i + 1], z = split.trees[i + 2], scale = split.trees[i + 3], rot = split.trees[i + 4];
-      temp.position.set(x, y, z + scale * 1.45);
+      const j = i / 6;
+      const x = split.trees[i], y = split.trees[i + 1], z = split.trees[i + 2];
+      const scale = split.trees[i + 3], rot = split.trees[i + 4];
+      temp.position.set(x, y, z + scale * 1.1);
       temp.rotation.set(0, 0, rot);
-      temp.scale.setScalar(scale);
-      temp.updateMatrix();
-      treeRef.current?.setMatrixAt(j, temp.matrix);
-      temp.position.set(x, y, z + scale * 0.7);
-      temp.scale.set(scale * 0.18, scale * 0.18, scale * 0.85);
+      temp.scale.set(scale * 0.9, scale * 0.9, scale * 0.95);
       temp.updateMatrix();
       trunkRef.current?.setMatrixAt(j, temp.matrix);
+
+      // Six tapered fronds create a readable low-poly tropical palm crown.
+      for (let frond = 0; frond < 6; frond++) {
+        const angle = rot + (frond / 6) * Math.PI * 2;
+        const direction = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0.34).normalize();
+        temp.position.set(x + Math.cos(angle) * scale * 0.33, y + Math.sin(angle) * scale * 0.33, z + scale * 2.2);
+        temp.quaternion.setFromUnitVectors(up, direction);
+        temp.scale.set(scale * 0.82, scale * 0.82, scale * 0.9);
+        temp.updateMatrix();
+        frondRef.current?.setMatrixAt(j * 6 + frond, temp.matrix);
+      }
     }
-    if (treeRef.current) treeRef.current.instanceMatrix.needsUpdate = true;
+    if (frondRef.current) frondRef.current.instanceMatrix.needsUpdate = true;
     if (trunkRef.current) trunkRef.current.instanceMatrix.needsUpdate = true;
     for (let i = 0; i < split.rocks.length; i += 6) {
       const j = i / 6, x = split.rocks[i], y = split.rocks[i + 1], z = split.rocks[i + 2], scale = split.rocks[i + 3], rot = split.rocks[i + 4];
@@ -367,7 +422,7 @@ function PropsBatch({ data, visible, vegetationRevision }: { data: TerrainData; 
   }, [split]);
   return (
     <>
-      <instancedMesh ref={treeRef} args={[treeGeo, treeMat, split.trees.length / 6]} visible={visible} castShadow receiveShadow />
+      <instancedMesh ref={frondRef} args={[frondGeo, frondMat, split.trees.length / 6 * 6]} visible={visible} castShadow receiveShadow />
       <instancedMesh ref={trunkRef} args={[trunkGeo, trunkMat, split.trees.length / 6]} visible={visible} castShadow receiveShadow />
       <instancedMesh ref={rockRef} args={[rockGeo, rockMat, split.rocks.length / 6]} visible={visible} castShadow receiveShadow />
     </>
@@ -376,7 +431,7 @@ function PropsBatch({ data, visible, vegetationRevision }: { data: TerrainData; 
 
 function GrassBatch({ data, visible, vegetationRevision }: { data: TerrainData; visible: boolean; vegetationRevision: number }) {
   const mesh = useRef<THREE.InstancedMesh>(null);
-  const geometry = useMemo(() => new THREE.ConeGeometry(0.075, 0.58, 3), []);
+  const geometry = useMemo(() => { const shape = new THREE.ConeGeometry(0.075, 0.58, 3); shape.rotateX(Math.PI / 2); return shape; }, []);
   const material = useMemo(() => new THREE.MeshStandardMaterial({ color: "#528c4a", roughness: 1 }), []);
   useEffect(() => {
     const temp = new THREE.Object3D();
@@ -400,14 +455,65 @@ function Ocean({ size, visible, waves }: { size: number; visible: boolean; waves
   const material = useMemo(() => new THREE.ShaderMaterial({
     transparent: true,
     uniforms: { uTime: { value: 0 }, uWaves: { value: waves ? 1 : 0 } },
-    vertexShader: `varying vec2 vUv; uniform float uTime; uniform float uWaves;
-      void main(){ vUv=uv; vec3 p=position; p.z += sin(p.x*0.0018+uTime*0.6)*0.25*uWaves + cos(p.y*0.0024-uTime*0.4)*0.18*uWaves; gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0); }`,
-    fragmentShader: `varying vec2 vUv; uniform float uTime;
-      void main(){ float w=sin(vUv.x*80.0+uTime)*0.025+cos(vUv.y*68.0-uTime*0.7)*0.02; vec3 c=mix(vec3(0.015,0.12,0.20),vec3(0.035,0.38,0.47),clamp(vUv.y*0.7+0.25+w,0.0,1.0)); gl_FragColor=vec4(c,0.94); }`,
+    vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vWorldPosition;
+      varying float vWave;
+      uniform float uTime;
+      uniform float uWaves;
+      void main() {
+        vUv = uv;
+        vec3 p = position;
+        float a = sin(p.x * 0.0017 + uTime * 0.55);
+        float b = cos(p.y * 0.0022 - uTime * 0.42);
+        float c = sin((p.x + p.y) * 0.004 + uTime * 0.22);
+        p.z += (a * 0.32 + b * 0.22 + c * 0.08) * uWaves;
+        vWave = a * 0.5 + b * 0.35 + c * 0.15;
+        vec4 world = modelMatrix * vec4(p, 1.0);
+        vWorldPosition = world.xyz;
+        gl_Position = projectionMatrix * viewMatrix * world;
+      }
+    `,
+    fragmentShader: `
+      precision highp float;
+      varying vec2 vUv;
+      varying vec3 vWorldPosition;
+      varying float vWave;
+      uniform float uTime;
+      void main() {
+        vec2 uv = vWorldPosition.xy * 0.0013;
+        float longWave = sin(uv.x * 5.5 + uv.y * 2.1 + uTime * 0.24);
+        float crossWave = cos(uv.y * 6.8 - uv.x * 1.7 - uTime * 0.18);
+        float ripples = sin(uv.x * 26.0 + uTime * 0.55) * cos(uv.y * 21.0 - uTime * 0.42);
+        float caustics = smoothstep(0.46, 0.93, longWave * crossWave * 0.5 + 0.5 + ripples * 0.08);
+        vec3 deep = vec3(0.012, 0.075, 0.105);
+        vec3 coastal = vec3(0.035, 0.235, 0.245);
+        vec3 surface = vec3(0.07, 0.34, 0.34);
+        float depthGradient = clamp(0.30 + vUv.y * 0.28 + vWave * 0.1, 0.0, 1.0);
+        vec3 water = mix(deep, coastal, depthGradient);
+        water = mix(water, surface, caustics * 0.16);
+        vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+        float fresnel = pow(1.0 - max(dot(viewDirection, vec3(0.0, 0.0, 1.0)), 0.0), 3.0);
+        water = mix(water, vec3(0.31, 0.58, 0.55), fresnel * 0.28);
+        water += vec3(0.015, 0.026, 0.028) * max(vWave, 0.0);
+        gl_FragColor = vec4(water, 0.96);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
     depthWrite: false,
-  }), [waves]);
-  useFrame((state) => { material.uniforms.uTime.value = state.clock.elapsedTime; });
-  return <mesh position={[0, 0, -0.5]} visible={visible}><planeGeometry args={[size * 1.8, size * 1.8]} /><primitive object={material} attach="material" /></mesh>;
+    toneMapped: true,
+  }), []);
+  useFrame((state) => {
+    material.uniforms.uTime.value = state.clock.elapsedTime;
+    material.uniforms.uWaves.value = waves ? 1 : 0;
+  });
+  return (
+    <mesh position={[0, 0, 0]} visible={visible}>
+      <planeGeometry args={[size * 1.8, size * 1.8, 1, 1]} />
+      <primitive object={material} attach="material" />
+    </mesh>
+  );
 }
 
 function Player({
