@@ -38,5 +38,4 @@ jobs:
             Built from native-engine/ using ragekit.
             The executable is downloaded automatically by npm run dev and stored under .islandforge/bin/.
           files: build/native/Release/island-forge-native-engine.exe
-          asset_name: island-forge-native-engine-win-x64.exe
           fail_on_unmatched_files: true
