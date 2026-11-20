@@ -95,24 +95,17 @@ Les sources GunWare fournies contenaient les noms des dictionnaires de textures 
 - Une inspection CodeWalker et un test sur un serveur FiveM propre restent recommandés avant déploiement.
 
 
-## Run locally
+## Validation et démarrage en production
 
-Requirements: Node.js 20+, Blender 4.5+, Sollumz and PyMateria for native GTA exports.
+Après le développement, tu peux vérifier et compiler le projet :
 
 ~~~bash
-npm install
-npm run dev
-~~~
-
-Open http://localhost:3000. Next.js and the local export worker are started together; no .env file is needed.
-
-## Type check and production build
-
-```bash
 npm run typecheck
 npm run build
 npm start
-```
+~~~
+
+npm start démarre Next.js et le worker local ensemble, comme npm run dev.
 
 ## Deploy
 
