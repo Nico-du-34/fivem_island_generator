@@ -1,20 +1,34 @@
 import { spawn, spawnSync } from "node:child_process";
 import { connect } from "node:net";
 import { existsSync, readdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const mode = process.argv[2] || "dev";
 const forwardedArgs = process.argv.slice(3);
 const localBase = "http://127.0.0.1:8787";
 const localToken = "islandforge-local-development-only";
+const bridgeUrl = (process.env.ISLAND_EXPORT_BRIDGE_URL || localBase).replace(/\/+$/, "");
+const bridgeToken = process.env.ISLAND_EXPORT_BRIDGE_TOKEN || localToken;
+const workerHost = process.env.ISLAND_WORKER_HOST || "127.0.0.1";
+const isLoopback = ["127.0.0.1", "::1", "localhost"].includes(workerHost);
+const isLocalBridge = bridgeUrl === localBase;
+
+if (!isLocalBridge && !process.env.ISLAND_EXPORT_BRIDGE_TOKEN) {
+  console.error("[Island Forge] Un worker distant nécessite ISLAND_EXPORT_BRIDGE_TOKEN. Pour le lancement local, retire ISLAND_EXPORT_BRIDGE_URL.");
+  process.exit(1);
+}
+if (!isLoopback && (!process.env.ISLAND_EXPORT_BRIDGE_TOKEN || bridgeToken === localToken)) {
+  console.error("[Island Forge] Un worker réseau nécessite une adresse loopback interdite au défaut et un token personnalisé long.");
+  process.exit(1);
+}
 
 process.chdir(root);
 const env = {
   ...process.env,
-  ISLAND_EXPORT_BRIDGE_URL: process.env.ISLAND_EXPORT_BRIDGE_URL || localBase,
-  ISLAND_EXPORT_BRIDGE_TOKEN: process.env.ISLAND_EXPORT_BRIDGE_TOKEN || localToken,
-  ISLAND_WORKER_HOST: process.env.ISLAND_WORKER_HOST || "127.0.0.1",
+  ISLAND_EXPORT_BRIDGE_URL: bridgeUrl,
+  ISLAND_EXPORT_BRIDGE_TOKEN: bridgeToken,
+  ISLAND_WORKER_HOST: workerHost,
   ISLAND_WORKER_PORT: process.env.ISLAND_WORKER_PORT || "8787",
   ISLAND_WORKER_DATA: process.env.ISLAND_WORKER_DATA || join(root, ".islandforge", "jobs"),
 };
@@ -125,7 +139,10 @@ if (startLocalWorker) {
     if (blender) {
       env.BLENDER_PATH = blender;
       const addon = findSollumz(blender);
-      if (addon) env.SOLLUMZ_ADDON_PATH = addon;
+      if (addon) {
+        env.SOLLUMZ_ADDON_PATH = addon;
+        env.SOLLUMZ_ADDON_MODULE = env.SOLLUMZ_ADDON_MODULE || basename(addon);
+      }
       console.log("[Island Forge] Blender détecté :", blender);
       if (addon) console.log("[Island Forge] Sollumz détecté :", addon);
       else console.log("[Island Forge] Sollumz non détecté automatiquement ; vérifie son installation dans Blender.");
