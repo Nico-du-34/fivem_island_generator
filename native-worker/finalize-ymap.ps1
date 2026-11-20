@@ -30,16 +30,16 @@ if (-not (Test-Path $config)) {
     throw "config\native-export.json est introuvable. Ce script doit être lancé depuis le dossier de la ressource exportée."
 }
 $data = Get-Content -Raw -LiteralPath $config | ConvertFrom-Json
-$data.nativeReady = $true
-$data.manualCodeWalkerFinalizeRequired = $false
-$data.finalizedYmap = "stream/" + (Split-Path -Leaf $YmapPath)
-$data.finalizedAt = (Get-Date).ToUniversalTime().ToString("o")
+$data | Add-Member -MemberType NoteProperty -Name nativeReady -Value $true -Force
+$data | Add-Member -MemberType NoteProperty -Name manualCodeWalkerFinalizeRequired -Value $false -Force
+$data | Add-Member -MemberType NoteProperty -Name finalizedYmap -Value ("stream/" + (Split-Path -Leaf $YmapPath)) -Force
+$data | Add-Member -MemberType NoteProperty -Name finalizedAt -Value ((Get-Date).ToUniversalTime().ToString("o")) -Force
 $data | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $config -Encoding UTF8
 
 if (Test-Path $report) {
     $reportData = Get-Content -Raw -LiteralPath $report | ConvertFrom-Json
-    $reportData.nativeReady = $true
-    $reportData.ymapBinary = "stream/" + (Split-Path -Leaf $YmapPath)
+    $reportData | Add-Member -MemberType NoteProperty -Name nativeReady -Value $true -Force
+    $reportData | Add-Member -MemberType NoteProperty -Name ymapBinary -Value ("stream/" + (Split-Path -Leaf $YmapPath)) -Force
     $reportData | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $report -Encoding UTF8
 }
 
