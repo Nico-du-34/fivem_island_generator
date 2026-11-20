@@ -3,9 +3,6 @@ import { connect } from "node:net";
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const mode = process.argv[2] || "dev";
 const forwardedArgs = process.argv.slice(3);
@@ -165,7 +162,11 @@ if (mode === "worker") {
     await new Promise((resolvePromise) => worker.once("exit", resolvePromise));
   }
 } else {
-const nextCli = require.resolve("next/dist/bin/next");
+const nextCli = join(root, "node_modules", "next", "dist", "bin", "next");
+if (!existsSync(nextCli)) {
+  console.error("[Island Forge] Next.js est introuvable. Lance npm install depuis la racine du projet.");
+  stop(1);
+}
 const webMode = mode === "start" ? "start" : "dev";
 web = spawn(process.execPath, [nextCli, webMode, ...forwardedArgs], {
   cwd: root,
