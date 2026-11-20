@@ -8,6 +8,18 @@ const SOURCES = {
     url: "https://raw.githubusercontent.com/DurtyFree/gta-v-data-dumps/master/ObjectList.ini",
     kind: "lines",
   },
+  vehicles: {
+    url: "https://raw.githubusercontent.com/DurtyFree/gta-v-data-dumps/master/VehicleList.ini",
+    kind: "hashes",
+  },
+  peds: {
+    url: "https://raw.githubusercontent.com/DurtyFree/gta-v-data-dumps/master/PedList.ini",
+    kind: "hashes",
+  },
+  weapons: {
+    url: "https://raw.githubusercontent.com/DurtyFree/gta-v-data-dumps/master/WeaponList.ini",
+    kind: "hashes",
+  },
   zones: {
     url: "https://raw.githubusercontent.com/DurtyFree/gta-v-data-dumps/master/zones.json",
     kind: "json",
@@ -39,9 +51,18 @@ async function loadDataset(dataset: Dataset) {
   if (!response.ok) throw new Error("La source DurtyFree est momentanément indisponible.");
 
   const text = await response.text();
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith(";"));
   const value = source.kind === "lines"
-    ? [...new Set(text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith(";")))]
-    : JSON.parse(text);
+    ? [...new Set(lines)]
+    : source.kind === "hashes"
+      ? lines.flatMap((line) => {
+          const separator = line.indexOf("=");
+          if (separator <= 0) return [];
+          const name = line.slice(0, separator).trim();
+          const hash = line.slice(separator + 1).trim();
+          return name && hash ? [{ name, hash }] : [];
+        })
+      : JSON.parse(text);
 
   cache.set(dataset, { expires: Date.now() + 86_400_000, value });
   return value;
@@ -67,16 +88,16 @@ export async function GET(request: Request, context: { params: Promise<{ dataset
     const source = await loadDataset(dataset);
     let items: unknown[] = [];
 
-    if (dataset === "objects") {
-      const names = source as string[];
+    if (dataset === "objects" || dataset === "vehicles" || dataset === "peds" || dataset === "weapons") {
+      const names = source as Array<string | { name: string; hash: string }>;
+      const normalized = names.map((entry) => typeof entry === "string" ? { name: entry, hash: null } : entry);
       const filtered = query
-        ? names.filter((name) => normalize(name).includes(query))
-        : names;
-      const page = filtered.slice(offset, offset + limit);
-      items = page.map((name) => ({
-        name,
-        category: name.split("_")[0] || "prop",
-        hash: null,
+        ? normalized.filter((entry) => normalize(entry.name + " " + entry.hash).includes(query))
+        : normalized;
+      items = filtered.slice(offset, offset + limit).map((entry) => ({
+        name: entry.name,
+        hash: entry.hash,
+        category: dataset,
       }));
       return NextResponse.json({
         dataset,
