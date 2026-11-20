@@ -50,17 +50,48 @@ The ZIP now contains:
 
 The source ZIP is **not a finished FiveM map**. OBJ, GLB, RAW and fallback PNGs are not native GTA V RAGE assets.
 
-### Native FiveM package (requires a Windows worker)
-The app has a server-side proxy for a separate native export service. Set:
+### Native FiveM package (requires the Windows worker)
+
+The repository now includes a separate worker in [native-worker/](native-worker/). It receives export jobs through the authenticated Next.js proxy, starts Blender in background mode, builds terrain tiles and collisions with Sollumz, and packages the result.
+
+It currently generates:
+- Native **YDR** terrain drawables.
+- Native **YBN** coarse BVH collisions.
+- Native **YTYP** archetypes.
+- Native **YTD** texture dictionary.
+- A **YMAP CodeWalker XML** containing tile placements, LOD/SLOD hierarchy and configured tree/rock model placements.
+- A FiveM resource scaffold, material manifests, water/vegetation metadata and an export report.
+
+**YMAP caveat:** current Sollumz exports YMAP through CodeWalker XML, not as a native binary YMAP. The worker ZIP is therefore marked **nativeReady: false**. Open the XML in CodeWalker, save it as binary .ymap, then run the included finalize-ymap.ps1 from the resource root. Do not start the resource as a complete map before this step.
+
+#### Install and run the worker
+
+Requirements: Windows 10/11 x64, Node.js 20+, Blender 4.0+ (4.5 recommended), Sollumz 2.9.1+ and PyMateria for native Gen8/Gen9 exports, plus CodeWalker for final YMAP conversion.
+
+1. Install Sollumz and PyMateria in the same Blender profile used by the worker.
+2. Open PowerShell in native-worker/ and configure the environment variables described in [native-worker/README.md](native-worker/README.md).
+3. Start the worker with start-worker.ps1.
+4. Configure the web app's .env:
 
 \`\`\`dotenv
-ISLAND_EXPORT_BRIDGE_URL=http://127.0.0.1:8787
-ISLAND_EXPORT_BRIDGE_TOKEN=replace-with-a-long-random-token
+ISLAND_EXPORT_BRIDGE_URL=http://WINDOWS_WORKER_LAN_IP:8787
+ISLAND_EXPORT_BRIDGE_TOKEN=the-same-long-random-secret
 \`\`\`
 
-The worker contract is documented in [docs/export-bridge.md](docs/export-bridge.md). The request now carries terrain buffers, material dictionary names, props and grass placements, the target generation and requested YDR/YBN/YMAP/YTYP/YTD/LOD stages.
+Keep the worker behind a LAN/VPN/firewall. The HTTP service refuses to start without a bearer token. It runs one Blender conversion at a time and stores temporary jobs under ISLAND_WORKER_DATA.
 
-The bridge itself is **not bundled or configured** by the web app. It must run on Windows with a pinned Blender/Sollumz/CodeWalker toolchain, resolve/prepare texture assets, create native binaries and validate the completed resource. Without it, native export reports that the bridge is missing; the browser source/conversion package remains available.
+#### Textures
+
+The supplied GunWare source files contained GTA texture dictionary names, not the original diffuse/normal bitmaps. If you have legally available diffuse/normal replacement images, put them in GUNWARE_TEXTURE_DIR using <material-id>_diffuse.png and <material-id>_normal.png filenames. Otherwise the worker creates procedural fallback maps, packs them into YTD and uses them for the YDR materials. These are fallback textures, not original GunWare/GTA bitmaps.
+
+#### Current limitations
+
+- YMAP binary conversion remains a manual CodeWalker step.
+- Native GTA water quads are not produced yet; water settings are included as metadata.
+- Grass placement data is retained, but a native YMAP grass batch is not created yet.
+- Trees and rocks use built-in GTA model names; verify those archetypes exist in the target game build/custom asset pack.
+- Final validation in CodeWalker and on a clean FiveM server is still required.
+
 
 ## Run locally
 
