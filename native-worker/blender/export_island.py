@@ -566,6 +566,26 @@ def main():
         "note": "Native GTA water quad authoring remains a separate step.",
     }, indent=2), encoding="utf-8")
     written = [str(path.relative_to(output_assets)) for path in output_assets.rglob("*") if path.is_file()]
+    # Re-open every emitted native YMAP through szio's provider. This exercises
+    # the same native reader/writer API used by Sollumz rather than trusting a file extension.
+    from szio.gta5 import AssetMapData, try_load_asset
+    native_map_paths = list(output_assets.rglob("*.ymap"))
+    if not native_map_paths:
+        raise RuntimeError("PyMateria n'a créé aucun YMAP natif.")
+    ymap_validation = []
+    for map_path in native_map_paths:
+        reopened = try_load_asset(map_path)
+        if not isinstance(reopened, AssetMapData):
+            raise RuntimeError("Le YMAP natif ne peut pas être relu par szio : " + str(map_path))
+        entity_count = len(reopened.entities or [])
+        if entity_count < 1:
+            raise RuntimeError("Le YMAP natif est vide : " + str(map_path))
+        ymap_validation.append({
+            "file": str(map_path.relative_to(output_assets)),
+            "name": reopened.name,
+            "entities": entity_count,
+            "reopenedBySzio": True,
+        })
     report = {
         "resource": resource,
         "generation": generation,
@@ -591,6 +611,7 @@ def main():
         },
         "ymapCodeWalkerXml": [item for item in written if item.lower().endswith(".ymap.xml")],
         "ymapBinaryProduced": any(item.lower().endswith(".ymap") for item in written),
+        "ymapRoundTripValidation": ymap_validation,
         "nativeExportBackend": "Sollumz + szio + PyMateria",
         "notes": [
             "YMAP is written as a native RSC resource by the Sollumz/szio PyMateria provider.",
