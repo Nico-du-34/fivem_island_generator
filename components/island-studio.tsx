@@ -870,117 +870,114 @@ export default function IslandStudio() {
               onMove={moveWorldOrigin}
             />
           ) : (
-            
-                      {!terrain ? (
-                        <div className="viewport-loading"><Loader2 size={24} className="spin" /><span>Initialisation du générateur…</span></div>
-                      ) : (
-                        <>
-                          <div className="hud hud-left" id="hud-display">
-                            <div className="hud-title">Affichage <ChevronDown size={13} /></div>
-                            <div className="hud-body">
-                              <div className="view-modes">
-                                {(["render", "height", "material", "wireframe"] as ViewMode[]).map((mode) => <button key={mode} className={viewMode === mode ? "view-mode is-active" : "view-mode"} onClick={() => setViewMode(mode)}>{mode === "render" ? "Rendu" : mode === "height" ? "Altitude" : mode === "material" ? "Couches" : "Wireframe"}</button>)}
-                              </div>
-                              <div className="hud-sep" />
-                              <div className="hud-toggle-grid">
-                                <CheckLine label="Herbe" checked={layers.grass} onChange={(v) => setLayer("grass", v)} />
-                                <CheckLine label="Arbres & rochers" checked={layers.props} onChange={(v) => setLayer("props", v)} />
-                                <CheckLine label="Eau" checked={layers.water} onChange={(v) => setLayer("water", v)} />
-                                <CheckLine label="Grille (G)" checked={layers.grid} onChange={(v) => setLayer("grid", v)} />
-                                <CheckLine label="Chunks" checked={layers.chunks} onChange={(v) => setLayer("chunks", v)} />
-                                <CheckLine label="Repères" checked={layers.context} onChange={(v) => setLayer("context", v)} />
-                              </div>
-                              <div className="hud-row"><span><Sun size={12} /> Heure</span><input type="range" min="5" max="21" step="0.1" value={hour} onChange={(event) => setHour(Number(event.target.value))} /><strong>{hour.toFixed(1)} h</strong></div>
-                            </div>
-                          </div>
-            
-                          <div className="hud-right-stack">
-                            <div className="view-cube-host">
-                              <div className="cube-stage">
-                                <button className="cube-top" onClick={() => canvasRef.current?.setTopView(true)}>DESSUS</button>
-                                <div className="cube-faces">
-                                  <button onClick={() => canvasRef.current?.setTopView(false)}>3D</button>
-                                  <button onClick={() => canvasRef.current?.frameIsland()}>REC</button>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="hud hud-stats">
-                              <div className="hud-title">Carte</div>
-                              <dl className="stats">
-                                <dt>Taille</dt><dd>{formatWorldSize(generatedSettings.worldSize)}</dd>
-                                <dt>Terre</dt><dd>{stats?.land.toFixed(1)} km²</dd>
-                                <dt>Altitude</dt><dd>{stats?.height.toFixed(0)} m</dd>
-                                <dt>Chunks</dt><dd>{stats?.chunks}</dd>
-                              </dl>
-                              <div className="hud-placement"><span>Seed <b>{generatedSettings.seed}</b></span><span>Centre <b>{generatedSettings.originX}, {generatedSettings.originY}</b></span><PlacementStatus settings={generatedSettings} /></div>
-                            </div>
-                          </div>
-            
-                          <div className="toolbar">
-                            <div className="tb-tools">
-                              {[
-                                ["orbit", "Caméra", "1"], ["raise", "Élever", "2"], ["lower", "Creuser", "3"],
-                                ["smooth", "Lisser", "4"], ["flatten", "Aplanir", "5"], ["paint", "Peindre", "6"],
-                                ["erase", "Gomme", "7"], ["vegRemove", "Déboiser", "8"], ["vegAdd", "Densifier", "9"],
-                              ].map(([id, label, key]) => <button type="button" key={id} className={activeTool === id ? "tb-tool is-active" : "tb-tool"} title={label + " (" + key + ")"} onClick={() => { setPlayMode(false); setActiveTool(id as BrushTool); }}><i className={"tb-dot tool-" + id} /><span>{label}</span><kbd>{key}</kbd></button>)}
-                            </div>
-                            <div className="tb-controls">
-                              {activeTool === "paint" && <div className="tb-layers">{MATERIAL_OPTIONS.map((layer, index) => <button key={layer.id} className={activeLayer === index ? "tb-swatch is-active" : "tb-swatch"} title={layer.label} style={{ background: layer.color }} onClick={() => setActiveLayer(index)} />)}</div>}
-                              <label className="tb-slider"><span>Rayon</span><input type="range" min="2" max={Math.min(120, Math.max(10, Math.round(generatedSettings.worldSize / 14)))} value={brushRadius} onChange={(event) => setBrushRadius(Number(event.target.value))} /><b>{brushRadius} m</b></label>
-                              <label className="tb-slider"><span>Force</span><input type="range" min="0.05" max="1" step="0.05" value={brushStrength} onChange={(event) => setBrushStrength(Number(event.target.value))} /><b>{Math.round(brushStrength * 100)}%</b></label>
-                              <div className="tb-actions">
-                                <button className="tb-btn" disabled={!history.canUndo} onClick={() => canvasRef.current?.undo()} title="Annuler (Ctrl+Z)"><Undo2 size={15} /></button>
-                                <button className="tb-btn" disabled={!history.canRedo} onClick={() => canvasRef.current?.redo()} title="Rétablir (Ctrl+Y)"><Redo2 size={15} /></button>
-                                <button className="tb-btn tb-text" onClick={() => canvasRef.current?.clearEdits()} title="Effacer toutes les retouches"><RotateCcw size={13} /> Effacer</button>
-                                {history.canUndo && <span className="tb-badge">Retouches en cours</span>}
-                              </div>
-                            </div>
-                          </div>
-            
-                          <div className="viewport-canvas">
-                            <IslandCanvas
-                              ref={canvasRef}
-                              data={terrain}
-                              settings={generatedSettings}
-                              activeTool={activeTool}
-                              brushRadius={brushRadius}
-                              brushStrength={brushStrength}
-                              activeLayer={activeLayer}
-                              viewMode={viewMode}
-                              layers={layers}
-                              hour={hour}
-                              playMode={playMode}
-                              onPlayModeChange={setPlayMode}
-                              onPlayerStatus={setPlayerStatus}
-                              onHistoryChange={setHistory}
-                              onEditChanged={() => setNotice("Retouche de terrain modifiée")}
-                              onClearEdits={() => void generate(generatedSettings)}
-                            />
-                          </div>
-            
-                          <div className="scale-bar">
-                            <span>{generatedSettings.originX}, {generatedSettings.originY}</span>
-                            <div className="scale-line"><i /></div><strong>{formatWorldSize(Math.max(100, Math.round(generatedSettings.worldSize / 5 / 100) * 100))}</strong>
-                          </div>
-            
-                          <div className="viewer-overlay" id="keys-overlay">
-                            <span><kbd>1–9</kbd> outils</span><span><kbd>[ ]</kbd> rayon</span><span><kbd>Ctrl+Z</kbd> annuler</span><span><kbd>T</kbd> dessus</span><span><kbd>G</kbd> grille</span><span><kbd>P</kbd> jouer</span><span><kbd>R</kbd> seed</span><span><kbd>V</kbd> variantes</span>
-                          </div>
-            
-                          {playMode && <div className="play-hud">
-                            <div className="crosshair">+</div>
-                            <div className="play-keys"><span><kbd>ZQSD</kbd> bouger</span><span><kbd>Maj</kbd> sprint</span><span><kbd>Alt</kbd> marcher</span><span><kbd>Espace</kbd> sauter</span><span><kbd>C</kbd> 1re / 3e pers.</span><span><kbd>Échap</kbd> quitter</span></div>
-                            {playerStatus && <div className="play-coordinate"><b>{Math.round(playerStatus.x)}, {Math.round(playerStatus.y)}</b> · {playerStatus.swimming ? "nage" : "alt. " + playerStatus.z.toFixed(1) + " m"} · {Math.round(playerStatus.speed * 3.6)} km/h</div>}
-                          </div>}
-                        </>
-                      )}
-            
-                      {busy && <div className="busy"><span>{busyLabel}</span><div className="busy-bar"><span style={{ width: progress + "%" }} /></div></div>}
-                    </mai
-          )}
-        </main>n>
-      </div>
+            <>
+              {!terrain ? (
+                <div className="viewport-loading"><Loader2 size={24} className="spin" /><span>Initialisation du générateur…</span></div>
+              ) : (
+                <>
+                  <div className="hud hud-left" id="hud-display">
+                    <div className="hud-title">Affichage <ChevronDown size={13} /></div>
+                    <div className="hud-body">
+                      <div className="view-modes">
+                        {(["render", "height", "material", "wireframe"] as ViewMode[]).map((mode) => <button key={mode} className={viewMode === mode ? "view-mode is-active" : "view-mode"} onClick={() => setViewMode(mode)}>{mode === "render" ? "Rendu" : mode === "height" ? "Altitude" : mode === "material" ? "Couches" : "Wireframe"}</button>)}
+                      </div>
+                      <div className="hud-sep" />
+                      <div className="hud-toggle-grid">
+                        <CheckLine label="Herbe" checked={layers.grass} onChange={(v) => setLayer("grass", v)} />
+                        <CheckLine label="Arbres & rochers" checked={layers.props} onChange={(v) => setLayer("props", v)} />
+                        <CheckLine label="Eau" checked={layers.water} onChange={(v) => setLayer("water", v)} />
+                        <CheckLine label="Grille (G)" checked={layers.grid} onChange={(v) => setLayer("grid", v)} />
+                        <CheckLine label="Chunks" checked={layers.chunks} onChange={(v) => setLayer("chunks", v)} />
+                        <CheckLine label="Repères" checked={layers.context} onChange={(v) => setLayer("context", v)} />
+                      </div>
+                      <div className="hud-row"><span><Sun size={12} /> Heure</span><input type="range" min="5" max="21" step="0.1" value={hour} onChange={(event) => setHour(Number(event.target.value))} /><strong>{hour.toFixed(1)} h</strong></div>
+                    </div>
+                  </div>
 
+                  <div className="hud-right-stack">
+                    <div className="view-cube-host">
+                      <div className="cube-stage">
+                        <button className="cube-top" onClick={() => canvasRef.current?.setTopView(true)}>DESSUS</button>
+                        <div className="cube-faces">
+                          <button onClick={() => canvasRef.current?.setTopView(false)}>3D</button>
+                          <button onClick={() => canvasRef.current?.frameIsland()}>REC</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="hud hud-stats">
+                      <div className="hud-title">Carte</div>
+                      <dl className="stats">
+                        <dt>Taille</dt><dd>{formatWorldSize(generatedSettings.worldSize)}</dd>
+                        <dt>Terre</dt><dd>{stats?.land.toFixed(1)} km²</dd>
+                        <dt>Altitude</dt><dd>{stats?.height.toFixed(0)} m</dd>
+                        <dt>Chunks</dt><dd>{stats?.chunks}</dd>
+                      </dl>
+                      <div className="hud-placement"><span>Seed <b>{generatedSettings.seed}</b></span><span>Centre <b>{generatedSettings.originX}, {generatedSettings.originY}</b></span><PlacementStatus settings={generatedSettings} /></div>
+                    </div>
+                  </div>
+
+                  <div className="toolbar">
+                    <div className="tb-tools">
+                      {[
+                        ["orbit", "Caméra", "1"], ["raise", "Élever", "2"], ["lower", "Creuser", "3"],
+                        ["smooth", "Lisser", "4"], ["flatten", "Aplanir", "5"], ["paint", "Peindre", "6"],
+                        ["erase", "Gomme", "7"], ["vegRemove", "Déboiser", "8"], ["vegAdd", "Densifier", "9"],
+                      ].map(([id, label, key]) => <button type="button" key={id} className={activeTool === id ? "tb-tool is-active" : "tb-tool"} title={label + " (" + key + ")"} onClick={() => { setPlayMode(false); setActiveTool(id as BrushTool); }}><i className={"tb-dot tool-" + id} /><span>{label}</span><kbd>{key}</kbd></button>)}
+                    </div>
+                    <div className="tb-controls">
+                      {activeTool === "paint" && <div className="tb-layers">{MATERIAL_OPTIONS.map((layer, index) => <button key={layer.id} className={activeLayer === index ? "tb-swatch is-active" : "tb-swatch"} title={layer.label} style={{ background: layer.color }} onClick={() => setActiveLayer(index)} />)}</div>}
+                      <label className="tb-slider"><span>Rayon</span><input type="range" min="2" max={Math.min(120, Math.max(10, Math.round(generatedSettings.worldSize / 14)))} value={brushRadius} onChange={(event) => setBrushRadius(Number(event.target.value))} /><b>{brushRadius} m</b></label>
+                      <label className="tb-slider"><span>Force</span><input type="range" min="0.05" max="1" step="0.05" value={brushStrength} onChange={(event) => setBrushStrength(Number(event.target.value))} /><b>{Math.round(brushStrength * 100)}%</b></label>
+                      <div className="tb-actions">
+                        <button className="tb-btn" disabled={!history.canUndo} onClick={() => canvasRef.current?.undo()} title="Annuler (Ctrl+Z)"><Undo2 size={15} /></button>
+                        <button className="tb-btn" disabled={!history.canRedo} onClick={() => canvasRef.current?.redo()} title="Rétablir (Ctrl+Y)"><Redo2 size={15} /></button>
+                        <button className="tb-btn tb-text" onClick={() => canvasRef.current?.clearEdits()} title="Effacer toutes les retouches"><RotateCcw size={13} /> Effacer</button>
+                        {history.canUndo && <span className="tb-badge">Retouches en cours</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="viewport-canvas">
+                    <IslandCanvas
+                      ref={canvasRef}
+                      data={terrain}
+                      settings={generatedSettings}
+                      activeTool={activeTool}
+                      brushRadius={brushRadius}
+                      brushStrength={brushStrength}
+                      activeLayer={activeLayer}
+                      viewMode={viewMode}
+                      layers={layers}
+                      hour={hour}
+                      playMode={playMode}
+                      onPlayModeChange={setPlayMode}
+                      onPlayerStatus={setPlayerStatus}
+                      onHistoryChange={setHistory}
+                      onEditChanged={() => setNotice("Retouche de terrain modifiée")}
+                      onClearEdits={() => void generate(generatedSettings)}
+                    />
+                  </div>
+
+                  <div className="scale-bar">
+                    <span>{generatedSettings.originX}, {generatedSettings.originY}</span>
+                    <div className="scale-line"><i /></div><strong>{formatWorldSize(Math.max(100, Math.round(generatedSettings.worldSize / 5 / 100) * 100))}</strong>
+                  </div>
+
+                  <div className="viewer-overlay" id="keys-overlay">
+                    <span><kbd>1–9</kbd> outils</span><span><kbd>[ ]</kbd> rayon</span><span><kbd>Ctrl+Z</kbd> annuler</span><span><kbd>T</kbd> dessus</span><span><kbd>G</kbd> grille</span><span><kbd>P</kbd> jouer</span><span><kbd>R</kbd> seed</span><span><kbd>V</kbd> variantes</span>
+                  </div>
+
+                  {playMode && <div className="play-hud">
+                    <div className="crosshair">+</div>
+                    <div className="play-keys"><span><kbd>ZQSD</kbd> bouger</span><span><kbd>Maj</kbd> sprint</span><span><kbd>Alt</kbd> marcher</span><span><kbd>Espace</kbd> sauter</span><span><kbd>C</kbd> 1re / 3e pers.</span><span><kbd>Échap</kbd> quitter</span></div>
+                    {playerStatus && <div className="play-coordinate"><b>{Math.round(playerStatus.x)}, {Math.round(playerStatus.y)}</b> · {playerStatus.swimming ? "nage" : "alt. " + playerStatus.z.toFixed(1) + " m"} · {Math.round(playerStatus.speed * 3.6)} km/h</div>}
+                  </div>}
+                </>
+              )}
+              {busy && <div className="busy"><span>{busyLabel}</span><div className="busy-bar"><span style={{ width: progress + "%" }} /></div></div>}
+            </>
+          )}
+        </main>
       <footer className="statusbar">
         <span className="status-indicator" />
         <span>{notice}</span>
