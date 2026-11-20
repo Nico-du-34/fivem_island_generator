@@ -64,6 +64,7 @@ La vue 3D ne reconstruit pas encore le relief natif de Los Santos et Blaine Coun
 Island Forge charge les métadonnées depuis [DurtyFree/gta-v-data-dumps](https://github.com/DurtyFree/gta-v-data-dumps) via une API Next.js mise en cache :
 
 - **Props** : recherche dans la liste des noms d'objets créables, puis ajout au placement.
+- **Véhicules, peds et armes** : catalogues de noms et hashes issus des listes INI DurtyFree, disponibles pour consultation.
 - **Zones** : noms et limites du monde.
 - **IPL** : noms, catégories et coordonnées disponibles.
 - **Intérieurs/MLO** : noms et emplacements publiés par le dump.
