@@ -16,6 +16,10 @@ jobs:
           node-version: "20"
       - name: Install dependencies
         run: npm install
+      - name: Check Windows worker JavaScript syntax
+        run: node --check native-worker/server.mjs
+      - name: Check Blender worker Python syntax
+        run: python3 -m py_compile native-worker/blender/export_island.py
       - name: Type check
         run: npm run typecheck
       - name: Build
