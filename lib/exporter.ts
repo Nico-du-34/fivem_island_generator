@@ -314,7 +314,7 @@ export async function exportIslandPackage(settings: IslandSettings, data: Terrai
       label: material.label,
       diffuseTextureDictionary: material.diffuse,
       normalTextureDictionary: material.normal,
-      collisionMaterial: material.collisionMaterial,
+      collisionMaterial: material.collision,
       previewTint: material.tint,
       textureAssetsIncluded: false,
       fallbackMaps: [
@@ -351,7 +351,7 @@ export async function exportIslandPackage(settings: IslandSettings, data: Terrai
     vertices: collision.vertices,
     resolution: collision.resolution,
     purpose: "coarse source mesh for creating a GTA YBN collision asset",
-    materialPerLayer: selectedMaterials.map((material) => ({ slot: material.slot, id: material.id, collisionMaterial: material.collision })),
+    materialPerLayer: selectedMaterials.map((material) => ({ slot: material.slot, id: material.id, collisionMaterial: material.collisionMaterial })),
     note: "This OBJ is not a YBN file. Configure collision flags/materials in the native conversion stage.",
   }, null, 2));
 
